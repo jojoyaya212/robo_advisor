@@ -405,12 +405,27 @@ with tab_tool:
             asset_type = "All" 
         else:
             asset_type = st.selectbox("Asset Class", ["Equity (Sector)", "Equity (Thematic)", "Bond (Gov/Corp)", "High Yield"])
-            key_map = {
+            # === NEW: Separate Keys for INFO Sheets and PRICE Sheets ===
+
+            info_key_map = {
+                "Equity (Sector)": "sector_etfs",
+                "Equity (Thematic)": "thematic",
+                "Bond (Gov/Corp)": "bond_etfs",
+                "High Yield": "high_yield",
+            }
+            
+            price_key_map = {
                 "Equity (Sector)": "sector_",
                 "Equity (Thematic)": "thematic",
                 "Bond (Gov/Corp)": "bond_etf",
-                "High Yield": "high_yield"
+                "High Yield": "high_yield",
             }
+            
+            # Keys used in different parts of the app
+            info_key  = info_key_map[asset_type]
+            price_key = price_key_map[asset_type]
+            
+            df_info = info_sheets.get(info_key, pd.DataFrame()).copy()
 
             base_key = key_map[asset_type]
 
@@ -522,8 +537,8 @@ with tab_tool:
                 tickers = top_liquid[ticker_col].astype(str).tolist()
                 
                 # --- SMART DATA MATCHING ---
-                prices, found_tickers, missing_tickers = get_prices_for(base_key, tickers)
-                
+                prices, found_tickers, missing_tickers = get_prices_for(price_key, tickers)
+
                 # Diagnostic Expander
                 with st.expander("Data Diagnostics (Technical Details)", expanded=False):
                     st.write(f"**Candidate ETFs:** {len(tickers)}")
