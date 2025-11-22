@@ -7,7 +7,7 @@
 # 3. Education Center
 # 4. Black-Litterman Model (Investor Friendly + Quantified)
 # 5. Dynamic "Master Filters" (Restores all your data work)
-# 6. Enhanced Constraints (Min 5 ETFs) & "Fuzzy" Data Matching
+# 6. Enhanced Constraints (Min 5 ETFs) & EXPLICIT Sheet Mapping
 
 import os
 import numpy as np
@@ -74,10 +74,21 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ============================================================
-# ⚡ DATA LOADING (CACHED)
+# ⚡ DATA LOADING (CACHED & EXPLICITLY MAPPED)
 # ============================================================
 
 FILE_PATH = "robo_advisor_data.xlsx"
+
+# EXPLICIT MAPPING: Info Sheet Name -> Price Sheet Name
+# Based on your screenshots, these are the exact pairs.
+SHEET_PAIRS = {
+    "sector_etfs": "sector_price",
+    "bond_etfs": "bond_etf_price",
+    "high_yield": "high yield price",
+    "thematic": "thematic price",
+    "canadian": "canadian_price",
+    "em_bonds": "em_bonds_price"
+}
 
 @st.cache_data(show_spinner=False)
 def load_data():
@@ -92,23 +103,23 @@ if sheets_all is None:
     st.error(f"File not found: {FILE_PATH}")
     st.stop()
 
-# Normalize sheet keys
-def normalize(name: str) -> str:
-    return (
-        str(name).lower()
-        .replace(" price", "")
-        .replace("_price", "")
-        .replace(" info", "")
-        .replace("_info", "")
-        .replace(" ", "_")
-        .strip()
-    )
+# Separate sheets based on explicit pairs
+info_sheets = {}
+price_sheets = {}
 
-raw_price_sheets = {k: v for k, v in sheets_all.items() if "price" in k.lower()}
-raw_info_sheets  = {k: v for k, v in sheets_all.items() if "price" not in k.lower()}
-
-price_sheets = {normalize(k): v for k, v in raw_price_sheets.items()}
-info_sheets  = {normalize(k): v for k, v in raw_info_sheets.items()}
+for info_name, price_name in SHEET_PAIRS.items():
+    # Robust finding: check if keys exist (case insensitive)
+    actual_keys = {k.lower(): k for k in sheets_all.keys()}
+    
+    # Find Info Sheet
+    if info_name.lower() in actual_keys:
+        real_info_name = actual_keys[info_name.lower()]
+        info_sheets[info_name] = sheets_all[real_info_name]
+    
+    # Find Price Sheet
+    if price_name.lower() in actual_keys:
+        real_price_name = actual_keys[price_name.lower()]
+        price_sheets[info_name] = sheets_all[real_price_name] # Store using INFO key for easy lookup
 
 # ============================================================
 # 🧮 HELPER FUNCTIONS
@@ -139,20 +150,23 @@ def ultra_clean_ticker(t):
     # 1. Remove all whitespace
     t = "".join(t.split())
     # 2. Remove specific suffixes if present at the end
-    # Order matters: .TO should be removed before checking others if needed
     for suffix in ["US", "CN", ".TO", "CH", "JT", "TT", "LN", "GR", "JP", "AU", "SW"]:
         if t.endswith(suffix):
             t = t[:-len(suffix)]
-            break # Remove only the last valid suffix found
+            break 
     return t
 
 def get_prices_for(base_key: str, tickers: list[str]) -> tuple[pd.DataFrame, list, list]:
     """
     Returns: (Price DataFrame, List of Found Tickers, List of Missing Tickers)
-    Uses ULTRA-CLEAN matching (ignoring spaces and suffixes completely).
+    Uses ULTRA-CLEAN matching.
     """
+    # Use the explicit price sheet map
     price_df = price_sheets.get(base_key)
-    if price_df is None or price_df.empty: return pd.DataFrame(), [], tickers
+    
+    if price_df is None or price_df.empty: 
+        # Fallback if sheet mapping failed
+        return pd.DataFrame(), [], tickers
     
     # Map: Ultra-Clean Ticker -> Actual Column Name
     col_map = {}
@@ -211,23 +225,17 @@ def calculate_metrics(prices: pd.DataFrame, freq: int = 252):
 def black_litterman_adjustment(mu_prior, cov, views, ticker_info):
     tau = 0.025 
     n_assets = len(mu_prior)
-    # Get column names from price matrix (which are the keys for mu_prior)
     tickers = mu_prior.index.tolist()
     
     active_views = [] 
     
-    # Helper: Match metadata tickers to price column tickers
     def get_indices(condition_col, condition_val):
         if condition_col not in ticker_info.columns: return []
         
-        # Find matching rows in info sheet
         matches = ticker_info[ticker_info[condition_col] == condition_val]
         ticker_col = get_ticker_col(ticker_info)
-        
-        # Create set of "clean" target tickers from info sheet
         target_clean = set(matches[ticker_col].apply(ultra_clean_ticker).tolist())
         
-        # Find indices in Price Matrix that match these clean tickers
         indices = []
         for i, t_price in enumerate(tickers):
             if ultra_clean_ticker(t_price) in target_clean:
@@ -396,6 +404,13 @@ with tab_tool:
     with st.sidebar:
         st.header("1. Screen Assets")
         
+        # Debug info about loaded sheets
+        with st.expander("Data Status (Debug)", expanded=False):
+            st.write(f"Info Sheets Loaded: {len(info_sheets)}")
+            st.write(f"Price Sheets Loaded: {len(price_sheets)}")
+            # List matched pairs
+            st.write("Active Pairs:", list(info_sheets.keys()))
+
         # 1. Region
         region_mode = st.radio("Region Focus", ["Canadian", "Global / US"], horizontal=True)
         
@@ -405,6 +420,7 @@ with tab_tool:
             asset_type = "All" 
         else:
             asset_type = st.selectbox("Asset Class", ["Equity (Sector)", "Equity (Thematic)", "Bond (Gov/Corp)", "High Yield"])
+            # Use keys from SHEET_PAIRS
             key_map = {
                 "Equity (Sector)": "sector_etfs",
                 "Equity (Thematic)": "thematic",
@@ -417,7 +433,7 @@ with tab_tool:
         df_info = info_sheets.get(base_key, pd.DataFrame()).copy()
         
         if df_info.empty:
-            st.error("Data not available for this selection.")
+            st.error(f"Data not found for key: {base_key}")
             st.stop()
 
         # 4. MASTER FILTER LOGIC
@@ -523,15 +539,23 @@ with tab_tool:
                 # --- SMART DATA MATCHING ---
                 prices, found_tickers, missing_tickers = get_prices_for(base_key, tickers)
                 
-                # Diagnostic Expander
-                with st.expander("Data Diagnostics (Technical Details)", expanded=False):
-                    st.write(f"**Candidate ETFs:** {len(tickers)}")
-                    st.write(f"**Valid Price Histories Found:** {len(found_tickers)}")
-                    if missing_tickers:
-                        st.write(f"**Missing Tickers:** {missing_tickers}")
-                    
-                if len(prices.columns) < 2: 
-                    st.error("Optimization Failed: Need at least 2 assets with price history.")
+                # Check logic: Why did we fall below 5 assets?
+                if len(found_tickers) < 5:
+                    with st.expander("⚠️ Data Diagnostics (Why < 5 Assets?)", expanded=True):
+                        st.warning(f"Only {len(found_tickers)} valid price histories found out of {len(tickers)} top candidates.")
+                        st.write(f"Optimization fell back to relaxed constraints (Max=100%) because fewer than 5 assets were available.")
+                        
+                        c1, c2 = st.columns(2)
+                        with c1:
+                            st.error(f"❌ Missing Price Data ({len(missing_tickers)})")
+                            st.write(missing_tickers)
+                        with c2:
+                            st.success(f"✅ Found Price Data ({len(found_tickers)})")
+                            st.write(found_tickers)
+                        st.info("The system used smart matching (ignoring suffixes like .TO or US) but still couldn't find these tickers in the price sheet.")
+
+                if len(prices) < 10: 
+                    st.error("Optimization Failed: Insufficient overlapping price history.")
                     st.stop()
 
                 # B. Calculate Stats
