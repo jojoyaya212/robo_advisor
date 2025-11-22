@@ -20,7 +20,7 @@ from scipy.optimize import minimize
 # ============================================================
 
 st.set_page_config(
-    page_title="Deco-Robo",
+    page_title="ETF Robo Advisor", # Updated Title
     page_icon="📈",
     layout="wide",
     initial_sidebar_state="expanded"
@@ -141,7 +141,13 @@ def get_prices_for(base_key: str, tickers: list[str]) -> pd.DataFrame:
     if not matched_cols: return pd.DataFrame()
     
     out = price_df[matched_cols].copy()
-    out = out.dropna(how="all").dropna(axis=0, how="any") 
+    
+    # FIX: Handle Data Gaps Robustly
+    # 1. Forward Fill: If a price is missing (e.g. holiday), assume it didn't change.
+    out = out.ffill()
+    
+    # 2. Drop rows only if they are STILL missing (e.g. dates before the ETF existed)
+    out = out.dropna(axis=0, how="any") 
     return out
 
 def calculate_metrics(prices: pd.DataFrame, freq: int = 252):
@@ -171,8 +177,7 @@ def black_litterman_adjustment(mu_prior, cov, views, ticker_info):
         valid_tickers = [t for t in matches[ticker_col] if t in tickers]
         return [tickers.index(t) for t in valid_tickers]
 
-    # --- VIEW LOGIC DEFINITIONS (MATCHES CHECKBOX KEYS) ---
-    
+    # --- VIEW LOGIC DEFINITIONS ---
     if "Tech" in views:
         idx = get_indices('Sector_Focus', 'Technology')
         if idx:
@@ -248,15 +253,13 @@ def optimize_portfolio(mu, cov, lambda_risk):
 
     cons = ({'type': 'eq', 'fun': lambda w: np.sum(w) - 1.0})
     
-    # --- DIVERSIFICATION CONSTRAINTS ---
-    # Max 30% per asset to force diversification (unless n < 4, then relax)
+    # Diversification: Max 30% per asset
     max_weight = 0.30 if n >= 4 else 1.0
     bounds = [(0.0, max_weight) for _ in range(n)]
 
     res = minimize(objective, w0, method='SLSQP', bounds=bounds, constraints=cons)
     
     if not res.success:
-        # Fallback: Equal Weight if optimization fails
         return pd.Series(np.ones(n)/n, index=mu.index)
         
     return pd.Series(res.x, index=mu.index)
@@ -265,7 +268,7 @@ def optimize_portfolio(mu, cov, lambda_risk):
 # 📄 TABS LAYOUT
 # ============================================================
 
-st.title("ETF Robo Advisor")
+st.title("ETF Robo Advisor") # UPDATED TITLE
 st.markdown("### The Deconstructed DIY Investment Kit")
 
 tab_tool, tab_edu = st.tabs(["🛠️ Robo-Advisor Tool", "📚 Education Center"])
@@ -350,11 +353,9 @@ with tab_tool:
             st.stop()
 
         # 4. MASTER FILTER LOGIC
-        # Restores ALL filters by dynamically finding columns
         st.markdown("### 🔍 Filters")
         active_filters = {}
         
-        # Comprehensive list of potential filter columns
         potential_filters = [
             "Management_Style", "ESG_Focus", "Issuer", "structure", 
             "Use_Derivative", "ETF_General_Type", "Strategic_Focus", 
@@ -417,7 +418,6 @@ with tab_tool:
             views = []
             c1, c2 = st.columns(2)
             
-            # Investor-Friendly + Quantified options
             if c1.checkbox("Tech Boom: I expect Tech to outperform (+25%)"): 
                 views.append("Tech")
             if c1.checkbox("Energy Slump: I expect Energy to lag (-5%)"): 
@@ -453,8 +453,28 @@ with tab_tool:
                 
                 prices = get_prices_for(base_key, tickers)
                 
-                if len(prices.columns) < 2:
-                    st.error("Not enough price history available for the selected assets (Need at least 2 with history).")
+                # --- UPDATED DIAGNOSTICS FOR "BLANK HISTORY" ERROR ---
+                if len(prices) < 10: # Less than 10 days of data implies a mismatch
+                    st.error("Optimization Failed: Insufficient common data history.")
+                    st.write(f"Found overlapping price data for {len(prices)} days across {len(prices.columns)} ETFs.")
+                    st.write("Assets with likely short history causing this:")
+                    
+                    # Check individual ticker lengths in raw data to help user debug
+                    debug_info = {}
+                    base_price_df = price_sheets.get(base_key)
+                    if base_price_df is not None:
+                        normalized_cols = {str(c).strip().lower(): c for c in base_price_df.columns}
+                        for t in tickers:
+                            norm_t = t.strip().lower()
+                            if norm_t in normalized_cols:
+                                col_name = normalized_cols[norm_t]
+                                count = base_price_df[col_name].count()
+                                debug_info[t] = count
+                            else:
+                                debug_info[t] = "Not in price sheet"
+                    st.write(debug_info)
+                    st.stop()
+
                 else:
                     # B. Calculate Stats
                     mu_hist, cov = calculate_metrics(prices)
@@ -469,7 +489,6 @@ with tab_tool:
                         weights_full = optimize_portfolio(mu_bl, cov, lambdas[risk_level])
                         
                         # E. Display Results
-                        # Filter for display ONLY, keep original for math? No, math is done.
                         weights_display = weights_full[weights_full > 0.01].sort_values(ascending=False)
                         
                         st.success("Optimization Complete!")
@@ -484,8 +503,6 @@ with tab_tool:
                             
                         with m_col:
                             st.markdown("#### Portfolio Stats")
-                            # FIX: Use FULL weights vector for portfolio stats calculation
-                            # to ensure dimensions align with mu_bl and cov
                             port_ret = weights_full @ mu_bl
                             port_vol = np.sqrt(weights_full @ cov @ weights_full)
                             sharpe = port_ret / port_vol
@@ -495,7 +512,6 @@ with tab_tool:
                             k2.metric("Volatility", f"{port_vol:.1%}")
                             k3.metric("Sharpe Ratio", f"{sharpe:.2f}")
                             
-                            # Chart uses display weights (cleaner)
                             st.bar_chart(weights_display)
 
 # Footer
