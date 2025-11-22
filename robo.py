@@ -7,6 +7,7 @@
 # 3. Education Center
 # 4. Black-Litterman Model (Investor Friendly + Quantified)
 # 5. Dynamic "Master Filters" (Restores all your data work)
+# 6. Diversification Constraints (Max 30% allocation)
 
 import os
 import numpy as np
@@ -246,13 +247,17 @@ def optimize_portfolio(mu, cov, lambda_risk):
         return -(ret - (lambda_risk * var))
 
     cons = ({'type': 'eq', 'fun': lambda w: np.sum(w) - 1.0})
-    bounds = [(0.00, 1.0) for _ in range(n)]
+    
+    # --- DIVERSIFICATION CONSTRAINTS ---
+    # Max 30% per asset to force diversification (unless n < 4, then relax)
+    max_weight = 0.30 if n >= 4 else 1.0
+    bounds = [(0.0, max_weight) for _ in range(n)]
 
     res = minimize(objective, w0, method='SLSQP', bounds=bounds, constraints=cons)
     
     if not res.success:
-        iv = 1 / np.sqrt(np.diag(cov))
-        return pd.Series(iv / iv.sum(), index=mu.index)
+        # Fallback: Equal Weight if optimization fails
+        return pd.Series(np.ones(n)/n, index=mu.index)
         
     return pd.Series(res.x, index=mu.index)
 
