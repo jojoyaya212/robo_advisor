@@ -7,7 +7,7 @@
 # 3. Education Center
 # 4. Black-Litterman Model (Investor Friendly + Quantified)
 # 5. Dynamic "Master Filters" (Restores all your data work)
-# 6. Enhanced Constraints (Min 5 ETFs) & Data Diagnostics
+# 6. Enhanced Constraints (Min 5 ETFs) & SMART Data Matching
 
 import os
 import numpy as np
@@ -129,34 +129,55 @@ def get_volume_col(df: pd.DataFrame) -> str | None:
             return c
     return None
 
+def clean_ticker(t):
+    """Normalize ticker for matching (remove suffix, spaces)."""
+    t = str(t).upper().strip()
+    # Remove common suffixes like .TO, US, etc. for looser matching
+    for suffix in [" US", " CN", ".TO", " CH", " JT", " TT"]:
+        if t.endswith(suffix):
+            t = t.replace(suffix, "").strip()
+    return t
+
 def get_prices_for(base_key: str, tickers: list[str]) -> tuple[pd.DataFrame, list, list]:
     """
     Returns: (Price DataFrame, List of Found Tickers, List of Missing Tickers)
+    Uses smart matching to handle 'AAPL' vs 'AAPL US'.
     """
     price_df = price_sheets.get(base_key)
     if price_df is None or price_df.empty: return pd.DataFrame(), [], tickers
     
-    # Create mapping: Normalized Ticker -> Actual Column Name
-    normalized_cols = {str(c).strip().lower(): c for c in price_df.columns}
+    # Create Smart Map: Clean Ticker -> Actual Column Name
+    # We map BOTH the exact name AND the cleaned name
+    col_map = {}
+    for c in price_df.columns:
+        col_map[str(c).strip()] = c          # Exact match
+        col_map[clean_ticker(c)] = c         # Clean match (no suffix)
     
     found_tickers = []
     missing_tickers = []
     matched_cols = []
 
     for t in tickers:
-        norm_t = t.strip().lower()
-        if norm_t in normalized_cols:
+        t_clean = clean_ticker(t)
+        t_exact = str(t).strip()
+        
+        # Try exact match first, then clean match
+        if t_exact in col_map:
+            matched_cols.append(col_map[t_exact])
             found_tickers.append(t)
-            matched_cols.append(normalized_cols[norm_t])
+        elif t_clean in col_map:
+            matched_cols.append(col_map[t_clean])
+            found_tickers.append(t)
         else:
             missing_tickers.append(t)
     
     if not matched_cols: return pd.DataFrame(), [], tickers
     
-    out = price_df[matched_cols].copy()
+    # Select columns and remove duplicates (if any ticker mapped to same col)
+    out = price_df[list(set(matched_cols))].copy()
     
-    # FIX: Handle Data Gaps Robustly
-    out = out.ffill()
+    # FIX: Handle Data Gaps Robustly (Forward Fill)
+    out = out.ffill() 
     out = out.dropna(axis=0, how="any") 
     
     return out, found_tickers, missing_tickers
@@ -172,23 +193,31 @@ def calculate_metrics(prices: pd.DataFrame, freq: int = 252):
     return mu, cov
 
 def black_litterman_adjustment(mu_prior, cov, views, ticker_info):
-    """
-    Adjusts expected returns based on user views.
-    """
     tau = 0.025 
     n_assets = len(mu_prior)
+    # Match indices based on column names in mu_prior (which are from price sheet)
     tickers = mu_prior.index.tolist()
     
     active_views = [] 
     
+    # Helper: Map metadata tickers to price tickers
+    # We need to find which price columns correspond to the view's sector
     def get_indices(condition_col, condition_val):
         if condition_col not in ticker_info.columns: return []
+        
+        # 1. Find tickers in Info Sheet that match condition
         matches = ticker_info[ticker_info[condition_col] == condition_val]
         ticker_col = get_ticker_col(ticker_info)
-        valid_tickers = [t for t in matches[ticker_col] if t in tickers]
-        return [tickers.index(t) for t in valid_tickers]
+        target_tickers = set(matches[ticker_col].apply(clean_ticker).tolist())
+        
+        # 2. Find indices in Price Matrix that match these tickers
+        indices = []
+        for i, t_price in enumerate(tickers):
+            if clean_ticker(t_price) in target_tickers:
+                indices.append(i)
+        return indices
 
-    # --- VIEW LOGIC DEFINITIONS ---
+    # --- VIEW LOGIC ---
     if "Tech" in views:
         idx = get_indices('Sector_Focus', 'Technology')
         if idx:
@@ -264,16 +293,11 @@ def optimize_portfolio(mu, cov, lambda_risk):
 
     cons = ({'type': 'eq', 'fun': lambda w: np.sum(w) - 1.0})
     
-    # --- ENFORCED DIVERSIFICATION CONSTRAINTS ---
-    # To ensure at least 5 ETFs are selected, no single ETF can exceed 20% weight.
-    # 100% / 20% = 5 assets minimum.
-    
     max_weight = 0.20 if n >= 5 else 1.0
     bounds = [(0.0, max_weight) for _ in range(n)]
 
     res = minimize(objective, w0, method='SLSQP', bounds=bounds, constraints=cons)
     
-    # DEBUGGING INFO
     status = {
         "success": res.success,
         "message": res.message,
@@ -468,7 +492,7 @@ with tab_tool:
 
                 tickers = top_liquid[ticker_col].astype(str).tolist()
                 
-                # --- NEW DATA DIAGNOSTICS ---
+                # --- SMART DATA MATCHING ---
                 prices, found_tickers, missing_tickers = get_prices_for(base_key, tickers)
                 
                 # Check logic: Why did we fall below 5 assets?
@@ -484,7 +508,7 @@ with tab_tool:
                         with c2:
                             st.success(f"✅ Found Price Data ({len(found_tickers)})")
                             st.write(found_tickers)
-                        st.info("Tip: This usually happens because the tickers in your 'Info' sheet don't exactly match the column headers in your 'Price' sheet (e.g. 'AAPL' vs 'AAPL US').")
+                        st.info("The system used smart matching (ignoring suffixes like .TO or US) but still couldn't find these tickers in the price sheet.")
 
                 if len(prices) < 10: 
                     st.error("Optimization Failed: Insufficient overlapping price history.")
