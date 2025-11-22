@@ -406,11 +406,12 @@ with tab_tool:
         else:
             asset_type = st.selectbox("Asset Class", ["Equity (Sector)", "Equity (Thematic)", "Bond (Gov/Corp)", "High Yield"])
             key_map = {
-                "Equity (Sector)": "sector_etfs",
+                "Equity (Sector)": "sector_",
                 "Equity (Thematic)": "thematic",
-                "Bond (Gov/Corp)": "bond_etfs",
+                "Bond (Gov/Corp)": "bond_etf",
                 "High Yield": "high_yield"
             }
+
             base_key = key_map[asset_type]
 
         # 3. Load Data
