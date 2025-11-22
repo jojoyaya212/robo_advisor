@@ -147,7 +147,6 @@ def get_prices_for(base_key: str, tickers: list[str]) -> tuple[pd.DataFrame, lis
     if price_df is None or price_df.empty: return pd.DataFrame(), [], tickers
     
     # Create Smart Map: Clean Ticker -> Actual Column Name
-    # We map BOTH the exact name AND the cleaned name
     col_map = {}
     for c in price_df.columns:
         col_map[str(c).strip()] = c          # Exact match
@@ -195,13 +194,10 @@ def calculate_metrics(prices: pd.DataFrame, freq: int = 252):
 def black_litterman_adjustment(mu_prior, cov, views, ticker_info):
     tau = 0.025 
     n_assets = len(mu_prior)
-    # Match indices based on column names in mu_prior (which are from price sheet)
     tickers = mu_prior.index.tolist()
     
     active_views = [] 
     
-    # Helper: Map metadata tickers to price tickers
-    # We need to find which price columns correspond to the view's sector
     def get_indices(condition_col, condition_val):
         if condition_col not in ticker_info.columns: return []
         
@@ -293,7 +289,17 @@ def optimize_portfolio(mu, cov, lambda_risk):
 
     cons = ({'type': 'eq', 'fun': lambda w: np.sum(w) - 1.0})
     
-    max_weight = 0.20 if n >= 5 else 1.0
+    # --- DIVERSIFICATION CONSTRAINTS (Dynamic) ---
+    # If we have 5+ assets, cap at 20%.
+    # If we have 3-4 assets, cap at 35%.
+    # If we have < 3 assets, let it ride (100%).
+    if n >= 5:
+        max_weight = 0.20
+    elif n >= 3:
+        max_weight = 0.35
+    else:
+        max_weight = 1.0
+        
     bounds = [(0.0, max_weight) for _ in range(n)]
 
     res = minimize(objective, w0, method='SLSQP', bounds=bounds, constraints=cons)
