@@ -7,7 +7,7 @@
 # 3. Education Center
 # 4. Black-Litterman Model (Investor Friendly + Quantified)
 # 5. Dynamic "Master Filters" (Restores all your data work)
-# 6. Enhanced Constraints (Min 5 ETFs) & Diagnostics
+# 6. Enhanced Constraints (Min 5 ETFs) & Data Diagnostics
 
 import os
 import numpy as np
@@ -129,23 +129,37 @@ def get_volume_col(df: pd.DataFrame) -> str | None:
             return c
     return None
 
-def get_prices_for(base_key: str, tickers: list[str]) -> pd.DataFrame:
+def get_prices_for(base_key: str, tickers: list[str]) -> tuple[pd.DataFrame, list, list]:
+    """
+    Returns: (Price DataFrame, List of Found Tickers, List of Missing Tickers)
+    """
     price_df = price_sheets.get(base_key)
-    if price_df is None or price_df.empty: return pd.DataFrame()
+    if price_df is None or price_df.empty: return pd.DataFrame(), [], tickers
     
+    # Create mapping: Normalized Ticker -> Actual Column Name
     normalized_cols = {str(c).strip().lower(): c for c in price_df.columns}
-    tickers_set = {t.strip().lower() for t in tickers}
     
-    matched_cols = [normalized_cols[t] for t in tickers_set if t in normalized_cols]
+    found_tickers = []
+    missing_tickers = []
+    matched_cols = []
+
+    for t in tickers:
+        norm_t = t.strip().lower()
+        if norm_t in normalized_cols:
+            found_tickers.append(t)
+            matched_cols.append(normalized_cols[norm_t])
+        else:
+            missing_tickers.append(t)
     
-    if not matched_cols: return pd.DataFrame()
+    if not matched_cols: return pd.DataFrame(), [], tickers
     
     out = price_df[matched_cols].copy()
     
     # FIX: Handle Data Gaps Robustly
     out = out.ffill()
     out = out.dropna(axis=0, how="any") 
-    return out
+    
+    return out, found_tickers, missing_tickers
 
 def calculate_metrics(prices: pd.DataFrame, freq: int = 252):
     """Returns annualized mean returns and covariance matrix."""
@@ -250,10 +264,9 @@ def optimize_portfolio(mu, cov, lambda_risk):
 
     cons = ({'type': 'eq', 'fun': lambda w: np.sum(w) - 1.0})
     
-    # --- UPDATED DIVERSIFICATION CONSTRAINTS ---
-    # Requirement: Leave at least 5 ETFs.
-    # To force >= 5 assets, Max Weight must be <= 20% (1/5 = 0.20)
-    # If we have fewer than 5 assets total, we relax this to avoid infeasibility.
+    # --- ENFORCED DIVERSIFICATION CONSTRAINTS ---
+    # To ensure at least 5 ETFs are selected, no single ETF can exceed 20% weight.
+    # 100% / 20% = 5 assets minimum.
     
     max_weight = 0.20 if n >= 5 else 1.0
     bounds = [(0.0, max_weight) for _ in range(n)]
@@ -455,21 +468,33 @@ with tab_tool:
 
                 tickers = top_liquid[ticker_col].astype(str).tolist()
                 
-                prices = get_prices_for(base_key, tickers)
+                # --- NEW DATA DIAGNOSTICS ---
+                prices, found_tickers, missing_tickers = get_prices_for(base_key, tickers)
                 
-                # DIAGNOSTIC CHECK 1: Price Data
+                # Check logic: Why did we fall below 5 assets?
+                if len(found_tickers) < 5:
+                    with st.expander("⚠️ Data Diagnostics (Why < 5 Assets?)", expanded=True):
+                        st.warning(f"Only {len(found_tickers)} valid price histories found out of {len(tickers)} top candidates.")
+                        st.write(f"Optimization fell back to relaxed constraints (Max=100%) because fewer than 5 assets were available.")
+                        
+                        c1, c2 = st.columns(2)
+                        with c1:
+                            st.error(f"❌ Missing Price Data ({len(missing_tickers)})")
+                            st.write(missing_tickers)
+                        with c2:
+                            st.success(f"✅ Found Price Data ({len(found_tickers)})")
+                            st.write(found_tickers)
+                        st.info("Tip: This usually happens because the tickers in your 'Info' sheet don't exactly match the column headers in your 'Price' sheet (e.g. 'AAPL' vs 'AAPL US').")
+
                 if len(prices) < 10: 
                     st.error("Optimization Failed: Insufficient overlapping price history.")
-                    st.info("Diagnosing Data Issue: The selected ETFs do not share enough trading days.")
                     st.stop()
 
                 # B. Calculate Stats
                 mu_hist, cov = calculate_metrics(prices)
                 
-                # DIAGNOSTIC CHECK 2: Math Stability
                 if mu_hist is None or mu_hist.isnull().values.any():
                     st.error("Optimization Failed: Covariance matrix contains NaNs.")
-                    st.info("Data Issue: Some selected assets have bad/empty price data.")
                     st.stop()
                 
                 # C. Apply Black-Litterman
@@ -479,10 +504,8 @@ with tab_tool:
                 result = optimize_portfolio(mu_bl, cov, lambdas[risk_level])
                 weights_full = result["weights"]
                 
-                # DIAGNOSTIC CHECK 3: Solver Success
                 if not result["success"]:
                     st.warning(f"Optimization Warning: Solver failed to converge. (Reason: {result['message']})")
-                    st.info("Code/Constraint Issue: Reverted to Equal Weights.")
                 
                 # E. Display Results
                 weights_display = weights_full[weights_full > 0.01].sort_values(ascending=False)
