@@ -7,7 +7,7 @@
 # 3. Education Center
 # 4. Black-Litterman Model (Investor Friendly + Quantified)
 # 5. Dynamic "Master Filters" (Restores all your data work)
-# 6. Diversification Constraints (Max 30% allocation)
+# 6. Enhanced Constraints (Min 5 ETFs) & Diagnostics
 
 import os
 import numpy as np
@@ -20,7 +20,7 @@ from scipy.optimize import minimize
 # ============================================================
 
 st.set_page_config(
-    page_title="ETF Robo Advisor", # Updated Title
+    page_title="ETF Robo Advisor", 
     page_icon="📈",
     layout="wide",
     initial_sidebar_state="expanded"
@@ -143,10 +143,7 @@ def get_prices_for(base_key: str, tickers: list[str]) -> pd.DataFrame:
     out = price_df[matched_cols].copy()
     
     # FIX: Handle Data Gaps Robustly
-    # 1. Forward Fill: If a price is missing (e.g. holiday), assume it didn't change.
     out = out.ffill()
-    
-    # 2. Drop rows only if they are STILL missing (e.g. dates before the ETF existed)
     out = out.dropna(axis=0, how="any") 
     return out
 
@@ -183,28 +180,28 @@ def black_litterman_adjustment(mu_prior, cov, views, ticker_info):
         if idx:
             row = np.zeros(n_assets)
             row[idx] = 1 / len(idx)
-            active_views.append((row, 0.25)) # +25%
+            active_views.append((row, 0.25)) 
 
     if "Energy" in views:
         idx = get_indices('Sector_Focus', 'Energy')
         if idx:
             row = np.zeros(n_assets)
             row[idx] = 1 / len(idx)
-            active_views.append((row, -0.05)) # -5%
+            active_views.append((row, -0.05)) 
 
     if "NorthAmerica" in views:
         idx = get_indices('Geographic_Focus', 'North America')
         if idx:
             row = np.zeros(n_assets)
             row[idx] = 1 / len(idx)
-            active_views.append((row, 0.15)) # +15%
+            active_views.append((row, 0.15)) 
 
     if "EmergingMarkets" in views:
         idx = get_indices('Geographic_Focus', 'Emerging Markets')
         if idx:
             row = np.zeros(n_assets)
             row[idx] = 1 / len(idx)
-            active_views.append((row, 0.18)) # +18%
+            active_views.append((row, 0.18)) 
 
     if "Stability" in views:
         idx_u = get_indices('Sector_Focus', 'Utilities')
@@ -213,14 +210,14 @@ def black_litterman_adjustment(mu_prior, cov, views, ticker_info):
         if idx:
             row = np.zeros(n_assets)
             row[idx] = 1 / len(idx)
-            active_views.append((row, 0.10)) # +10%
+            active_views.append((row, 0.10)) 
 
     if "HighYield" in views:
         idx = get_indices('ETF_General_Type', 'Bond')
         if idx:
             row = np.zeros(n_assets)
             row[idx] = 1 / len(idx)
-            active_views.append((row, 0.08)) # +8%
+            active_views.append((row, 0.08)) 
 
     if not active_views:
         return mu_prior
@@ -253,22 +250,29 @@ def optimize_portfolio(mu, cov, lambda_risk):
 
     cons = ({'type': 'eq', 'fun': lambda w: np.sum(w) - 1.0})
     
-    # Diversification: Max 30% per asset
-    max_weight = 0.30 if n >= 4 else 1.0
+    # --- UPDATED DIVERSIFICATION CONSTRAINTS ---
+    # Requirement: Leave at least 5 ETFs.
+    # To force >= 5 assets, Max Weight must be <= 20% (1/5 = 0.20)
+    # If we have fewer than 5 assets total, we relax this to avoid infeasibility.
+    
+    max_weight = 0.20 if n >= 5 else 1.0
     bounds = [(0.0, max_weight) for _ in range(n)]
 
     res = minimize(objective, w0, method='SLSQP', bounds=bounds, constraints=cons)
     
-    if not res.success:
-        return pd.Series(np.ones(n)/n, index=mu.index)
-        
-    return pd.Series(res.x, index=mu.index)
+    # DEBUGGING INFO
+    status = {
+        "success": res.success,
+        "message": res.message,
+        "weights": pd.Series(res.x, index=mu.index) if res.success else pd.Series(np.ones(n)/n, index=mu.index)
+    }
+    return status
 
 # ============================================================
 # 📄 TABS LAYOUT
 # ============================================================
 
-st.title("ETF Robo Advisor") # UPDATED TITLE
+st.title("ETF Robo Advisor") 
 st.markdown("### The Deconstructed DIY Investment Kit")
 
 tab_tool, tab_edu = st.tabs(["🛠️ Robo-Advisor Tool", "📚 Education Center"])
@@ -453,66 +457,58 @@ with tab_tool:
                 
                 prices = get_prices_for(base_key, tickers)
                 
-                # --- UPDATED DIAGNOSTICS FOR "BLANK HISTORY" ERROR ---
-                if len(prices) < 10: # Less than 10 days of data implies a mismatch
-                    st.error("Optimization Failed: Insufficient common data history.")
-                    st.write(f"Found overlapping price data for {len(prices)} days across {len(prices.columns)} ETFs.")
-                    st.write("Assets with likely short history causing this:")
-                    
-                    # Check individual ticker lengths in raw data to help user debug
-                    debug_info = {}
-                    base_price_df = price_sheets.get(base_key)
-                    if base_price_df is not None:
-                        normalized_cols = {str(c).strip().lower(): c for c in base_price_df.columns}
-                        for t in tickers:
-                            norm_t = t.strip().lower()
-                            if norm_t in normalized_cols:
-                                col_name = normalized_cols[norm_t]
-                                count = base_price_df[col_name].count()
-                                debug_info[t] = count
-                            else:
-                                debug_info[t] = "Not in price sheet"
-                    st.write(debug_info)
+                # DIAGNOSTIC CHECK 1: Price Data
+                if len(prices) < 10: 
+                    st.error("Optimization Failed: Insufficient overlapping price history.")
+                    st.info("Diagnosing Data Issue: The selected ETFs do not share enough trading days.")
                     st.stop()
 
-                else:
-                    # B. Calculate Stats
-                    mu_hist, cov = calculate_metrics(prices)
+                # B. Calculate Stats
+                mu_hist, cov = calculate_metrics(prices)
+                
+                # DIAGNOSTIC CHECK 2: Math Stability
+                if mu_hist is None or mu_hist.isnull().values.any():
+                    st.error("Optimization Failed: Covariance matrix contains NaNs.")
+                    st.info("Data Issue: Some selected assets have bad/empty price data.")
+                    st.stop()
+                
+                # C. Apply Black-Litterman
+                mu_bl = black_litterman_adjustment(mu_hist, cov, views, top_liquid)
+                
+                # D. Optimize
+                result = optimize_portfolio(mu_bl, cov, lambdas[risk_level])
+                weights_full = result["weights"]
+                
+                # DIAGNOSTIC CHECK 3: Solver Success
+                if not result["success"]:
+                    st.warning(f"Optimization Warning: Solver failed to converge. (Reason: {result['message']})")
+                    st.info("Code/Constraint Issue: Reverted to Equal Weights.")
+                
+                # E. Display Results
+                weights_display = weights_full[weights_full > 0.01].sort_values(ascending=False)
+                
+                st.success("Optimization Complete!")
+                
+                r_col, m_col = st.columns([1, 2])
+                
+                with r_col:
+                    st.markdown("#### Allocation")
+                    w_df = pd.DataFrame({"Ticker": weights_display.index, "Weight": weights_display.values})
+                    w_df["Weight"] = w_df["Weight"].apply(lambda x: f"{x:.1%}")
+                    st.dataframe(w_df, hide_index=True, use_container_width=True)
                     
-                    if mu_hist is None:
-                        st.error("Insufficient data points for covariance calculation.")
-                    else:
-                        # C. Apply Black-Litterman
-                        mu_bl = black_litterman_adjustment(mu_hist, cov, views, top_liquid)
-                        
-                        # D. Optimize
-                        weights_full = optimize_portfolio(mu_bl, cov, lambdas[risk_level])
-                        
-                        # E. Display Results
-                        weights_display = weights_full[weights_full > 0.01].sort_values(ascending=False)
-                        
-                        st.success("Optimization Complete!")
-                        
-                        r_col, m_col = st.columns([1, 2])
-                        
-                        with r_col:
-                            st.markdown("#### Allocation")
-                            w_df = pd.DataFrame({"Ticker": weights_display.index, "Weight": weights_display.values})
-                            w_df["Weight"] = w_df["Weight"].apply(lambda x: f"{x:.1%}")
-                            st.dataframe(w_df, hide_index=True, use_container_width=True)
-                            
-                        with m_col:
-                            st.markdown("#### Portfolio Stats")
-                            port_ret = weights_full @ mu_bl
-                            port_vol = np.sqrt(weights_full @ cov @ weights_full)
-                            sharpe = port_ret / port_vol
-                            
-                            k1, k2, k3 = st.columns(3)
-                            k1.metric("Exp. Return", f"{port_ret:.1%}")
-                            k2.metric("Volatility", f"{port_vol:.1%}")
-                            k3.metric("Sharpe Ratio", f"{sharpe:.2f}")
-                            
-                            st.bar_chart(weights_display)
+                with m_col:
+                    st.markdown("#### Portfolio Stats")
+                    port_ret = weights_full @ mu_bl
+                    port_vol = np.sqrt(weights_full @ cov @ weights_full)
+                    sharpe = port_ret / port_vol
+                    
+                    k1, k2, k3 = st.columns(3)
+                    k1.metric("Exp. Return", f"{port_ret:.1%}")
+                    k2.metric("Volatility", f"{port_vol:.1%}")
+                    k3.metric("Sharpe Ratio", f"{sharpe:.2f}")
+                    
+                    st.bar_chart(weights_display)
 
 # Footer
 st.markdown("---")
