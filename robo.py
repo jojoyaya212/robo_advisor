@@ -7,13 +7,14 @@
 # 3. Education Center
 # 4. Black-Litterman Model (Investor Friendly + Quantified)
 # 5. Dynamic "Master Filters" (Restores all your data work)
-# 6. Enhanced Constraints (Min 5 ETFs) & SMART Data Matching
+# 6. Enhanced Constraints (Min 5 ETFs) & "Fuzzy" Data Matching
 
 import os
 import numpy as np
 import pandas as pd
 import streamlit as st
 from scipy.optimize import minimize
+import re
 
 # ============================================================
 # 🎨 UI CONFIGURATION & CSS STYLING
@@ -129,40 +130,48 @@ def get_volume_col(df: pd.DataFrame) -> str | None:
             return c
     return None
 
-def clean_ticker(t):
-    """Normalize ticker for matching (remove suffix, spaces)."""
-    t = str(t).upper().strip()
-    # Remove common suffixes like .TO, US, etc. for looser matching
-    for suffix in [" US", " CN", ".TO", " CH", " JT", " TT"]:
+def ultra_clean_ticker(t):
+    """
+    Aggressive cleaner: removes ALL spaces and common suffixes.
+    Example: "  ABLD  US " -> "ABLD"
+    """
+    t = str(t).upper()
+    # 1. Remove all whitespace
+    t = "".join(t.split())
+    # 2. Remove specific suffixes if present at the end
+    # Order matters: .TO should be removed before checking others if needed
+    for suffix in ["US", "CN", ".TO", "CH", "JT", "TT", "LN", "GR", "JP", "AU", "SW"]:
         if t.endswith(suffix):
-            t = t.replace(suffix, "").strip()
+            t = t[:-len(suffix)]
+            break # Remove only the last valid suffix found
     return t
 
 def get_prices_for(base_key: str, tickers: list[str]) -> tuple[pd.DataFrame, list, list]:
     """
     Returns: (Price DataFrame, List of Found Tickers, List of Missing Tickers)
-    Uses smart matching to handle 'AAPL' vs 'AAPL US'.
+    Uses ULTRA-CLEAN matching (ignoring spaces and suffixes completely).
     """
     price_df = price_sheets.get(base_key)
     if price_df is None or price_df.empty: return pd.DataFrame(), [], tickers
     
-    # Create Smart Map: Clean Ticker -> Actual Column Name
+    # Map: Ultra-Clean Ticker -> Actual Column Name
     col_map = {}
     for c in price_df.columns:
-        col_map[str(c).strip()] = c          # Exact match
-        col_map[clean_ticker(c)] = c         # Clean match (no suffix)
+        # Map exact string
+        col_map[str(c).strip()] = c
+        # Map ultra-clean string
+        col_map[ultra_clean_ticker(c)] = c
     
     found_tickers = []
     missing_tickers = []
     matched_cols = []
 
     for t in tickers:
-        t_clean = clean_ticker(t)
-        t_exact = str(t).strip()
+        t_original = str(t).strip()
+        t_clean = ultra_clean_ticker(t)
         
-        # Try exact match first, then clean match
-        if t_exact in col_map:
-            matched_cols.append(col_map[t_exact])
+        if t_original in col_map:
+            matched_cols.append(col_map[t_original])
             found_tickers.append(t)
         elif t_clean in col_map:
             matched_cols.append(col_map[t_clean])
@@ -172,8 +181,13 @@ def get_prices_for(base_key: str, tickers: list[str]) -> tuple[pd.DataFrame, lis
     
     if not matched_cols: return pd.DataFrame(), [], tickers
     
-    # Select columns and remove duplicates (if any ticker mapped to same col)
+    # Select columns and remove duplicates
     out = price_df[list(set(matched_cols))].copy()
+    
+    # Ensure Date index is datetime
+    if "Date" in out.columns:
+        out["Date"] = pd.to_datetime(out["Date"])
+        out.set_index("Date", inplace=True)
     
     # FIX: Handle Data Gaps Robustly (Forward Fill)
     out = out.ffill() 
@@ -183,6 +197,9 @@ def get_prices_for(base_key: str, tickers: list[str]) -> tuple[pd.DataFrame, lis
 
 def calculate_metrics(prices: pd.DataFrame, freq: int = 252):
     """Returns annualized mean returns and covariance matrix."""
+    # Ensure numeric data
+    prices = prices.apply(pd.to_numeric, errors='coerce')
+    
     rets = np.log(prices / prices.shift(1)).dropna()
     if rets.empty: return None, None
     
@@ -194,22 +211,26 @@ def calculate_metrics(prices: pd.DataFrame, freq: int = 252):
 def black_litterman_adjustment(mu_prior, cov, views, ticker_info):
     tau = 0.025 
     n_assets = len(mu_prior)
+    # Get column names from price matrix (which are the keys for mu_prior)
     tickers = mu_prior.index.tolist()
     
     active_views = [] 
     
+    # Helper: Match metadata tickers to price column tickers
     def get_indices(condition_col, condition_val):
         if condition_col not in ticker_info.columns: return []
         
-        # 1. Find tickers in Info Sheet that match condition
+        # Find matching rows in info sheet
         matches = ticker_info[ticker_info[condition_col] == condition_val]
         ticker_col = get_ticker_col(ticker_info)
-        target_tickers = set(matches[ticker_col].apply(clean_ticker).tolist())
         
-        # 2. Find indices in Price Matrix that match these tickers
+        # Create set of "clean" target tickers from info sheet
+        target_clean = set(matches[ticker_col].apply(ultra_clean_ticker).tolist())
+        
+        # Find indices in Price Matrix that match these clean tickers
         indices = []
         for i, t_price in enumerate(tickers):
-            if clean_ticker(t_price) in target_tickers:
+            if ultra_clean_ticker(t_price) in target_clean:
                 indices.append(i)
         return indices
 
@@ -289,7 +310,7 @@ def optimize_portfolio(mu, cov, lambda_risk):
 
     cons = ({'type': 'eq', 'fun': lambda w: np.sum(w) - 1.0})
     
-    # --- DIVERSIFICATION CONSTRAINTS (Dynamic) ---
+    # --- DIVERSIFICATION CONSTRAINTS ---
     # If we have 5+ assets, cap at 20%.
     # If we have 3-4 assets, cap at 35%.
     # If we have < 3 assets, let it ride (100%).
@@ -491,33 +512,26 @@ with tab_tool:
                 sort_col = get_volume_col(filtered_df)
                 if sort_col:
                     filtered_df[sort_col] = pd.to_numeric(filtered_df[sort_col], errors='coerce').fillna(0)
-                    top_liquid = filtered_df.sort_values(by=sort_col, ascending=False).head(20)
+                    # Take top 30 to increase chance of finding 5 valid price histories
+                    top_liquid = filtered_df.sort_values(by=sort_col, ascending=False).head(30)
                 else:
-                    st.warning("Volume column not found, optimizing first 20 ETFs.")
-                    top_liquid = filtered_df.head(20)
+                    st.warning("Volume column not found, optimizing first 30 ETFs.")
+                    top_liquid = filtered_df.head(30)
 
                 tickers = top_liquid[ticker_col].astype(str).tolist()
                 
                 # --- SMART DATA MATCHING ---
                 prices, found_tickers, missing_tickers = get_prices_for(base_key, tickers)
                 
-                # Check logic: Why did we fall below 5 assets?
-                if len(found_tickers) < 5:
-                    with st.expander("⚠️ Data Diagnostics (Why < 5 Assets?)", expanded=True):
-                        st.warning(f"Only {len(found_tickers)} valid price histories found out of {len(tickers)} top candidates.")
-                        st.write(f"Optimization fell back to relaxed constraints (Max=100%) because fewer than 5 assets were available.")
-                        
-                        c1, c2 = st.columns(2)
-                        with c1:
-                            st.error(f"❌ Missing Price Data ({len(missing_tickers)})")
-                            st.write(missing_tickers)
-                        with c2:
-                            st.success(f"✅ Found Price Data ({len(found_tickers)})")
-                            st.write(found_tickers)
-                        st.info("The system used smart matching (ignoring suffixes like .TO or US) but still couldn't find these tickers in the price sheet.")
-
-                if len(prices) < 10: 
-                    st.error("Optimization Failed: Insufficient overlapping price history.")
+                # Diagnostic Expander
+                with st.expander("Data Diagnostics (Technical Details)", expanded=False):
+                    st.write(f"**Candidate ETFs:** {len(tickers)}")
+                    st.write(f"**Valid Price Histories Found:** {len(found_tickers)}")
+                    if missing_tickers:
+                        st.write(f"**Missing Tickers:** {missing_tickers}")
+                    
+                if len(prices.columns) < 2: 
+                    st.error("Optimization Failed: Need at least 2 assets with price history.")
                     st.stop()
 
                 # B. Calculate Stats
