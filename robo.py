@@ -5,7 +5,7 @@
 # 1. Caching for speed
 # 2. Clean, emoji-free UI (CSS injection)
 # 3. Education Center
-# 4. Black-Litterman Model (Investor Friendly)
+# 4. Black-Litterman Model (Investor Friendly + Quantified)
 # 5. Dynamic "Master Filters" (Restores all your data work)
 
 import os
@@ -120,11 +120,9 @@ def get_ticker_col(df: pd.DataFrame) -> str | None:
 
 def get_volume_col(df: pd.DataFrame) -> str | None:
     """Find the volume column robustly (handles typos/spaces)."""
-    # Priority list of likely column names from your dataset
     candidates = ["1d volume", "1D Volume", "1d_volume", "Volume", "volume", "1D volume"]
     for c in candidates:
         if c in df.columns: return c
-    # Fallback: look for any column with 'volume' in the name (excluding averages)
     for c in df.columns:
         if "volume" in str(c).lower() and "30" not in str(c): 
             return c
@@ -134,97 +132,89 @@ def get_prices_for(base_key: str, tickers: list[str]) -> pd.DataFrame:
     price_df = price_sheets.get(base_key)
     if price_df is None or price_df.empty: return pd.DataFrame()
     
-    # Normalize columns
     normalized_cols = {str(c).strip().lower(): c for c in price_df.columns}
     tickers_set = {t.strip().lower() for t in tickers}
     
-    # Find intersection
     matched_cols = [normalized_cols[t] for t in tickers_set if t in normalized_cols]
     
     if not matched_cols: return pd.DataFrame()
     
-    # Clean data
     out = price_df[matched_cols].copy()
-    out = out.dropna(how="all").dropna(axis=0, how="any") # Strict cleaning
+    out = out.dropna(how="all").dropna(axis=0, how="any") 
     return out
 
 def calculate_metrics(prices: pd.DataFrame, freq: int = 252):
     """Returns annualized mean returns and covariance matrix."""
-    # Calculate log returns
     rets = np.log(prices / prices.shift(1)).dropna()
     if rets.empty: return None, None
     
     mu = rets.mean() * freq
     cov = rets.cov() * freq
-    
-    # Add slight regularization to Covariance to prevent singular matrix errors
-    cov = cov + np.eye(cov.shape[0]) * 1e-6
+    cov = cov + np.eye(cov.shape[0]) * 1e-6 # Regularization
     return mu, cov
 
 def black_litterman_adjustment(mu_prior, cov, views, ticker_info):
     """
     Adjusts expected returns based on user views.
     """
-    tau = 0.025  # Standard scaling factor
+    tau = 0.025 
     n_assets = len(mu_prior)
     tickers = mu_prior.index.tolist()
     
-    active_views = [] # Store valid (P_row, Q_val) tuples
+    active_views = [] 
     
-    # Helper to find indices for a condition
     def get_indices(condition_col, condition_val):
         if condition_col not in ticker_info.columns: return []
         matches = ticker_info[ticker_info[condition_col] == condition_val]
-        # Ensure we are matching cleaned tickers
         ticker_col = get_ticker_col(ticker_info)
         valid_tickers = [t for t in matches[ticker_col] if t in tickers]
         return [tickers.index(t) for t in valid_tickers]
 
-    # --- VIEW LOGIC DEFINITIONS ---
+    # --- VIEW LOGIC DEFINITIONS (MATCHES CHECKBOX KEYS) ---
     
-    if "Tech Sector Boom" in views:
+    if "Tech" in views:
         idx = get_indices('Sector_Focus', 'Technology')
         if idx:
             row = np.zeros(n_assets)
             row[idx] = 1 / len(idx)
-            active_views.append((row, 0.25))
+            active_views.append((row, 0.25)) # +25%
 
-    if "Energy Slump" in views:
+    if "Energy" in views:
         idx = get_indices('Sector_Focus', 'Energy')
         if idx:
             row = np.zeros(n_assets)
             row[idx] = 1 / len(idx)
-            active_views.append((row, -0.05)) 
+            active_views.append((row, -0.05)) # -5%
 
-    if "North American Strength" in views:
+    if "NorthAmerica" in views:
         idx = get_indices('Geographic_Focus', 'North America')
         if idx:
             row = np.zeros(n_assets)
             row[idx] = 1 / len(idx)
-            active_views.append((row, 0.15)) 
+            active_views.append((row, 0.15)) # +15%
 
-    if "Emerging Markets Rally" in views:
+    if "EmergingMarkets" in views:
         idx = get_indices('Geographic_Focus', 'Emerging Markets')
         if idx:
             row = np.zeros(n_assets)
             row[idx] = 1 / len(idx)
-            active_views.append((row, 0.18))
+            active_views.append((row, 0.18)) # +18%
 
-    if "Stability Focus (Low Vol)" in views:
+    if "Stability" in views:
         idx_u = get_indices('Sector_Focus', 'Utilities')
         idx_c = get_indices('Sector_Focus', 'Consumer Staples')
         idx = idx_u + idx_c
         if idx:
             row = np.zeros(n_assets)
             row[idx] = 1 / len(idx)
-            active_views.append((row, 0.10))
+            active_views.append((row, 0.10)) # +10%
 
-    if "High Yield Opportunity" in views:
+    if "HighYield" in views:
         idx = get_indices('ETF_General_Type', 'Bond')
         if idx:
             row = np.zeros(n_assets)
             row[idx] = 1 / len(idx)
-            active_views.append((row, 0.08))
+            active_views.append((row, 0.08)) # +8%
 
     if not active_views:
         return mu_prior
@@ -232,7 +222,6 @@ def black_litterman_adjustment(mu_prior, cov, views, ticker_info):
     P = np.array([v[0] for v in active_views])
     Q = np.array([v[1] for v in active_views]).reshape(-1, 1)
     
-    # Omega = diag(P * (tau * Sigma) * P.T)
     omega = np.diag(np.diag(P @ (tau * cov.values) @ P.T))
     
     try:
@@ -245,7 +234,7 @@ def black_litterman_adjustment(mu_prior, cov, views, ticker_info):
         mu_bl = term1 @ term2
         return pd.Series(mu_bl.flatten(), index=tickers)
     except:
-        return mu_prior # Fallback if singular matrix
+        return mu_prior
 
 def optimize_portfolio(mu, cov, lambda_risk):
     n = len(mu)
@@ -355,41 +344,27 @@ with tab_tool:
             st.error("Data not available for this selection.")
             st.stop()
 
-        # 4. MASTER FILTER LOGIC (Restores ALL filters)
+        # 4. MASTER FILTER LOGIC
+        # Restores ALL filters by dynamically finding columns
         st.markdown("### 🔍 Filters")
         active_filters = {}
         
-        # List of ALL possible filter columns across your datasets
-        # This ensures every piece of data you collected is filterable if present
+        # Comprehensive list of potential filter columns
         potential_filters = [
-            "Management_Style", 
-            "ESG_Focus", 
-            "Issuer", 
-            "structure", 
-            "Use_Derivative", 
-            "ETF_General_Type",
-            "Strategic_Focus", 
-            "Sector_Focus", 
-            "Theme_Focus", 
-            "Geographic_Focus",
-            "Exchange_Region",
-            "Leverage_Type"
+            "Management_Style", "ESG_Focus", "Issuer", "structure", 
+            "Use_Derivative", "ETF_General_Type", "Strategic_Focus", 
+            "Sector_Focus", "Theme_Focus", "Geographic_Focus",
+            "Exchange_Region", "Leverage_Type"
         ]
         
         for col in potential_filters:
-            # Case-insensitive check to find the column in the dataframe
             col_match = next((c for c in df_info.columns if c.lower() == col.lower()), None)
-            
             if col_match:
-                # Clean up values for the dropdown (remove nan, strip spaces)
                 unique_vals = sorted([str(x).strip() for x in df_info[col_match].dropna().unique() if str(x).strip() != ""])
-                
                 if unique_vals:
                     unique_vals = ["All"] + unique_vals
-                    # Use a clean label for the UI (underscores to spaces)
                     label = col_match.replace("_", " ").replace("exposure", "").title()
                     sel = st.selectbox(label, unique_vals, key=f"filt_{base_key}_{col_match}")
-                    
                     if sel != "All":
                         active_filters[col_match] = sel
 
@@ -398,7 +373,6 @@ with tab_tool:
     # 1. Apply Filters
     filtered_df = df_info.copy()
     for col, val in active_filters.items():
-        # Convert column to string to ensure matching works
         filtered_df = filtered_df[filtered_df[col].astype(str).str.strip() == val]
 
     # 2. Display Screening Results
@@ -408,10 +382,11 @@ with tab_tool:
         st.warning("No ETFs match your filters.")
     else:
         # Dynamic Column Display
-        # Try to show useful columns if they exist
-        desired_cols = ["ticker", "name", "Expense_Ratio", "YTD_Return", "1d volume", "ETF_Type"]
-        final_disp_cols = [c for c in desired_cols if c in filtered_df.columns]
+        vol_col_display = get_volume_col(filtered_df)
+        disp_cols = ["ticker", "name", "Expense_Ratio", "YTD_Return"]
+        if vol_col_display: disp_cols.append(vol_col_display)
         
+        final_disp_cols = [c for c in disp_cols if c in filtered_df.columns]
         st.dataframe(filtered_df[final_disp_cols].head(50), use_container_width=True, hide_index=True)
         st.caption(f"Showing {len(filtered_df)} matching ETFs (Top 50 displayed)")
 
@@ -431,25 +406,25 @@ with tab_tool:
             lambdas = {"Conservative": 5.0, "Moderate": 2.5, "Aggressive": 1.0}
             
         with col_views:
-            st.markdown("**Market Views (Investor Perspective)**")
-            st.caption("Customize the model based on your personal outlook:")
+            st.markdown("**Market Views (Customize your Outlook)**")
+            st.caption("Combine your personal intuition with our math:")
             
             views = []
             c1, c2 = st.columns(2)
             
-            # Updated to "Investor Knowing Language"
-            if c1.checkbox("I believe Tech stocks are poised for a boom"): 
-                views.append("Tech Sector Boom")
-            if c1.checkbox("I think Energy stocks will struggle"): 
-                views.append("Energy Slump")
-            if c1.checkbox("I trust the North American economy will remain strong"): 
-                views.append("North American Strength")
-            if c2.checkbox("I see high growth potential in Emerging Markets"): 
-                views.append("Emerging Markets Rally")
-            if c2.checkbox("I prefer stable, low-volatility investments"): 
-                views.append("Stability Focus (Low Vol)")
-            if c2.checkbox("I am looking for high yield income opportunities"): 
-                views.append("High Yield Opportunity")
+            # Investor-Friendly + Quantified options
+            if c1.checkbox("Tech Boom: I expect Tech to outperform (+25%)"): 
+                views.append("Tech")
+            if c1.checkbox("Energy Slump: I expect Energy to lag (-5%)"): 
+                views.append("Energy")
+            if c1.checkbox("NA Strength: I trust the N.American economy (+15%)"): 
+                views.append("NorthAmerica")
+            if c2.checkbox("EM Rally: I see high growth in Emerging Mkts (+18%)"): 
+                views.append("EmergingMarkets")
+            if c2.checkbox("Stability: I prefer low-volatility sectors (+10%)"): 
+                views.append("Stability")
+            if c2.checkbox("High Yield: I want to capture Bond income (+8%)"): 
+                views.append("HighYield")
 
         # 4. Run Optimization Button
         if st.button("🚀 Generate Optimized Portfolio", type="primary"):
@@ -461,16 +436,11 @@ with tab_tool:
                     st.error("Could not find ticker column.")
                     st.stop()
                 
-                # ROBUST SORTING FIX: Find the actual volume column name to select liquid assets
                 sort_col = get_volume_col(filtered_df)
-                
                 if sort_col:
-                    # Ensure numeric for sorting
                     filtered_df[sort_col] = pd.to_numeric(filtered_df[sort_col], errors='coerce').fillna(0)
-                    # Take top 20 liquid assets to ensure optimization is fast and robust
                     top_liquid = filtered_df.sort_values(by=sort_col, ascending=False).head(20)
                 else:
-                    # Fallback if no volume column found
                     st.warning("Volume column not found, optimizing first 20 ETFs.")
                     top_liquid = filtered_df.head(20)
 
@@ -488,14 +458,14 @@ with tab_tool:
                         st.error("Insufficient data points for covariance calculation.")
                     else:
                         # C. Apply Black-Litterman
-                        # Pass the filtered DF to map views to tickers
                         mu_bl = black_litterman_adjustment(mu_hist, cov, views, top_liquid)
                         
                         # D. Optimize
-                        weights = optimize_portfolio(mu_bl, cov, lambdas[risk_level])
+                        weights_full = optimize_portfolio(mu_bl, cov, lambdas[risk_level])
                         
                         # E. Display Results
-                        weights = weights[weights > 0.01].sort_values(ascending=False) # Filter small weights
+                        # Filter for display ONLY, keep original for math? No, math is done.
+                        weights_display = weights_full[weights_full > 0.01].sort_values(ascending=False)
                         
                         st.success("Optimization Complete!")
                         
@@ -503,14 +473,16 @@ with tab_tool:
                         
                         with r_col:
                             st.markdown("#### Allocation")
-                            w_df = pd.DataFrame({"Ticker": weights.index, "Weight": weights.values})
+                            w_df = pd.DataFrame({"Ticker": weights_display.index, "Weight": weights_display.values})
                             w_df["Weight"] = w_df["Weight"].apply(lambda x: f"{x:.1%}")
                             st.dataframe(w_df, hide_index=True, use_container_width=True)
                             
                         with m_col:
                             st.markdown("#### Portfolio Stats")
-                            port_ret = weights @ mu_bl
-                            port_vol = np.sqrt(weights @ cov @ weights)
+                            # FIX: Use FULL weights vector for portfolio stats calculation
+                            # to ensure dimensions align with mu_bl and cov
+                            port_ret = weights_full @ mu_bl
+                            port_vol = np.sqrt(weights_full @ cov @ weights_full)
                             sharpe = port_ret / port_vol
                             
                             k1, k2, k3 = st.columns(3)
@@ -518,7 +490,8 @@ with tab_tool:
                             k2.metric("Volatility", f"{port_vol:.1%}")
                             k3.metric("Sharpe Ratio", f"{sharpe:.2f}")
                             
-                            st.bar_chart(weights)
+                            # Chart uses display weights (cleaner)
+                            st.bar_chart(weights_display)
 
 # Footer
 st.markdown("---")
