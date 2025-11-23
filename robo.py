@@ -18,7 +18,7 @@ import re
 # ============================================================
 
 st.set_page_config(
-    page_title="Deco-Robo Advisor", 
+    page_title="ETF Robo Advisor", 
     page_icon="✨",
     layout="wide",
     initial_sidebar_state="expanded"
