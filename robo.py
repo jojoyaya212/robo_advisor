@@ -343,7 +343,7 @@ def optimize_portfolio(mu, cov, lambda_risk):
 # ============================================================
 
 # Header Area
-st.title("Deco-Robo Advisor")
+st.title("ETF Robo Advisor")
 st.markdown("#### Empowering Canadian Investors with Institutional-Grade Tools")
 st.markdown("---")
 
