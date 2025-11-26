@@ -1,31 +1,30 @@
 # ============================================================
-# 🌟 PRETTIER ROBO ADVISOR (Project Kit Edition)
+# 🌟 PRETTIER ROBO ADVISOR (UX/UI Enhanced Edition)
 # ============================================================
-# MODIFICATIONS LOG:
-# 1. Selection Logic: 50% Liquidity / 50% Cost Score (Top 15).
-# 2. Constraints: Relaxed to (0.0, 1.0) to prevent solver failure.
-# 3. Black-Litterman: Adjusted view magnitudes to be realistic.
-# 4. UX: Added Rebalancing Frequency selector.
-# 5. Output: Added Weighted Portfolio MER (Expense Ratio).
+# Based on the robust logic of 'robo.py', but with a focus on:
+# 1. Cleaner, modern aesthetic (Custom CSS)
+# 2. Improved User Flow
+# 3. Clearer Explanations
 
 import os
 import numpy as np
 import pandas as pd
 import streamlit as st
 from scipy.optimize import minimize
+import re
 
 # ============================================================
 # 🎨 UI CONFIGURATION & CSS STYLING
 # ============================================================
 
 st.set_page_config(
-    page_title="Deco-Robo Advisor", 
-    page_icon="🤖",
+    page_title="ETF Robo Advisor", 
+    page_icon="✨",
     layout="wide",
     initial_sidebar_state="expanded"
 )
 
-# Custom CSS for a professional look
+# Custom CSS for a cleaner, more professional look
 st.markdown("""
     <style>
     /* Main Font */
@@ -34,22 +33,64 @@ st.markdown("""
         color: #333333;
         background-color: #ffffff;
     }
+    
+    /* Headings */
     h1, h2, h3 {
         font-weight: 700;
         color: #111111;
         letter-spacing: -0.5px;
     }
+    
+    /* Sidebar Styling */
     section[data-testid="stSidebar"] {
         background-color: #f7f9fc;
         border-right: 1px solid #e0e0e0;
     }
+    
+    /* Cards for Stats (Metrics) */
     div[data-testid="stMetric"] {
         background-color: #ffffff;
         border: 1px solid #e6e6e6;
         padding: 20px;
         border-radius: 12px;
         box-shadow: 0 2px 5px rgba(0,0,0,0.05);
+        transition: transform 0.2s;
     }
+    div[data-testid="stMetric"]:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+    }
+    
+    /* Primary Buttons */
+    div.stButton > button {
+        background-color: #000000;
+        color: white;
+        border-radius: 8px;
+        font-weight: 600;
+        border: none;
+        padding: 0.6rem 1.2rem;
+        transition: background-color 0.2s;
+    }
+    div.stButton > button:hover {
+        background-color: #333333;
+        color: white;
+    }
+    
+    /* DataFrame Styling */
+    div[data-testid="stDataFrame"] {
+        border: 1px solid #e0e0e0;
+        border-radius: 8px;
+        overflow: hidden;
+    }
+    
+    /* Expanders */
+    .streamlit-expanderHeader {
+        font-weight: 600;
+        background-color: #ffffff;
+        border-radius: 5px;
+    }
+    
+    /* Custom Header for Sections */
     .section-header {
         font-size: 1.2rem;
         font-weight: 600;
@@ -63,12 +104,12 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ============================================================
-# ⚡ DATA LOADING
+# ⚡ DATA LOADING (CACHED & EXPLICITLY MAPPED)
 # ============================================================
 
 FILE_PATH = "robo_advisor_data.xlsx"
 
-# Mapping: Info Sheet Name -> Price Sheet Name
+# EXPLICIT MAPPING: Info Sheet Name -> Price Sheet Name
 SHEET_PAIRS = {
     "sector_etfs": "sector_price",
     "bond_etfs": "bond_etf_price",
@@ -84,58 +125,70 @@ def load_data():
         return None
     return pd.read_excel(FILE_PATH, sheet_name=None)
 
-# Graceful loading
+# Graceful loading with a clean spinner
 with st.spinner("Initializing Deco-Robo... Loading market data..."):
     sheets_all = load_data()
 
 if sheets_all is None:
-    st.error(f"❌ Critical Error: Data file `{FILE_PATH}` not found.")
+    st.error(f"❌ Critical Error: Data file `{FILE_PATH}` not found. Please ensure it is in the application folder.")
     st.stop()
 
-# Organize sheets
+# Separate sheets based on explicit pairs
 info_sheets = {}
 price_sheets = {}
 
 for info_name, price_name in SHEET_PAIRS.items():
     actual_keys = {k.lower(): k for k in sheets_all.keys()}
+    
     if info_name.lower() in actual_keys:
-        info_sheets[info_name] = sheets_all[actual_keys[info_name.lower()]]
+        real_info_name = actual_keys[info_name.lower()]
+        info_sheets[info_name] = sheets_all[real_info_name]
+    
     if price_name.lower() in actual_keys:
-        price_sheets[info_name] = sheets_all[actual_keys[price_name.lower()]]
+        real_price_name = actual_keys[price_name.lower()]
+        price_sheets[info_name] = sheets_all[real_price_name]
 
 # ============================================================
 # 🧮 HELPER FUNCTIONS
 # ============================================================
 
 def get_ticker_col(df: pd.DataFrame) -> str | None:
-    for c in ["ticker", "Ticker", "TICKER", "symbol", "Symbol"]:
+    """Find the ticker column robustly."""
+    for c in ["ticker", "Ticker", "TICKER", "symbol", "Symbol", "SYMBOL"]:
         if c in df.columns: return c
     return None
 
 def get_volume_col(df: pd.DataFrame) -> str | None:
-    candidates = ["1d volume", "1D Volume", "1d_volume", "Volume", "volume", "Avg Volume"]
+    """Find the volume column robustly."""
+    candidates = ["1d volume", "1D Volume", "1d_volume", "Volume", "volume", "1D volume"]
     for c in candidates:
         if c in df.columns: return c
+    for c in df.columns:
+        if "volume" in str(c).lower() and "30" not in str(c): 
+            return c
     return None
 
 def get_expense_col(df: pd.DataFrame) -> str | None:
-    candidates = ["Expense_Ratio", "Expense Ratio", "MER", "Management Fee", "Fees"]
+    """Find the expense ratio column robustly."""
+    candidates = ["Expense_Ratio", "Expense Ratio", "MER", "Management Fee", "Fees", "expense_ratio"]
     for c in candidates:
         if c in df.columns: return c
     return None
 
 def ultra_clean_ticker(t):
-    """Removes spaces and common suffixes for matching."""
+    """Aggressive cleaner: removes ALL spaces and common suffixes."""
     t = str(t).upper()
     t = "".join(t.split())
-    for suffix in ["US", "CN", ".TO", "CH", "JT", "TT", "LN", "GR", "JP"]:
+    for suffix in ["US", "CN", ".TO", "CH", "JT", "TT", "LN", "GR", "JP", "AU", "SW"]:
         if t.endswith(suffix):
             t = t[:-len(suffix)]
             break 
     return t
 
-def get_prices_for(base_key: str, tickers: list[str]):
+def get_prices_for(base_key: str, tickers: list[str]) -> tuple[pd.DataFrame, list, list]:
+    """Returns: (Price DataFrame, List of Found Tickers, List of Missing Tickers)"""
     price_df = price_sheets.get(base_key)
+    
     if price_df is None or price_df.empty: 
         return pd.DataFrame(), [], tickers
     
@@ -149,9 +202,11 @@ def get_prices_for(base_key: str, tickers: list[str]):
     matched_cols = []
 
     for t in tickers:
+        t_original = str(t).strip()
         t_clean = ultra_clean_ticker(t)
-        if str(t).strip() in col_map:
-            matched_cols.append(col_map[str(t).strip()])
+        
+        if t_original in col_map:
+            matched_cols.append(col_map[t_original])
             found_tickers.append(t)
         elif t_clean in col_map:
             matched_cols.append(col_map[t_clean])
@@ -162,29 +217,29 @@ def get_prices_for(base_key: str, tickers: list[str]):
     if not matched_cols: return pd.DataFrame(), [], tickers
     
     out = price_df[list(set(matched_cols))].copy()
+    
     if "Date" in out.columns:
         out["Date"] = pd.to_datetime(out["Date"])
         out.set_index("Date", inplace=True)
     
-    out = out.ffill().dropna(axis=0, how="any")
+    out = out.ffill() 
+    out = out.dropna(axis=0, how="any") 
+    
     return out, found_tickers, missing_tickers
 
 def calculate_metrics(prices: pd.DataFrame, freq: int = 252):
+    """Returns annualized mean returns and covariance matrix."""
     prices = prices.apply(pd.to_numeric, errors='coerce')
     rets = np.log(prices / prices.shift(1)).dropna()
     if rets.empty: return None, None
+    
     mu = rets.mean() * freq
     cov = rets.cov() * freq
-    # Add tiny jitter to diagonal to ensure invertibility
     cov = cov + np.eye(cov.shape[0]) * 1e-6 
     return mu, cov
 
 def black_litterman_adjustment(mu_prior, cov, views, ticker_info):
-    """
-    Adjusts expected returns based on views.
-    tau: Scalar indicating uncertainty of the prior (standard is 0.025 - 0.05)
-    """
-    tau = 0.05 
+    tau = 0.05  # Adjusted from 0.025 to standard
     n_assets = len(mu_prior)
     tickers = mu_prior.index.tolist()
     active_views = [] 
@@ -200,52 +255,58 @@ def black_litterman_adjustment(mu_prior, cov, views, ticker_info):
                 indices.append(i)
         return indices
 
-    # MODIFIED: Reduced view magnitudes to realistic excess returns (e.g. 0.05 = 5%)
+    # --------------------------------------------------------
+    # MODIFICATION 3: Adjusted Views to be realistic (5% range)
+    # --------------------------------------------------------
     if "Tech" in views:
         idx = get_indices('Sector_Focus', 'Technology')
         if idx:
-            row = np.zeros(n_assets); row[idx] = 1/len(idx)
-            active_views.append((row, 0.05)) # Expect 5% excess return
+            row = np.zeros(n_assets)
+            row[idx] = 1 / len(idx)
+            active_views.append((row, 0.05)) # was 0.25
 
     if "Energy" in views:
         idx = get_indices('Sector_Focus', 'Energy')
         if idx:
-            row = np.zeros(n_assets); row[idx] = 1/len(idx)
-            active_views.append((row, -0.03)) # Expect -3% drag
+            row = np.zeros(n_assets)
+            row[idx] = 1 / len(idx)
+            active_views.append((row, -0.03)) # was -0.05
 
     if "NorthAmerica" in views:
         idx = get_indices('Geographic_Focus', 'North America')
         if idx:
-            row = np.zeros(n_assets); row[idx] = 1/len(idx)
-            active_views.append((row, 0.04)) 
+            row = np.zeros(n_assets)
+            row[idx] = 1 / len(idx)
+            active_views.append((row, 0.04)) # was 0.15
 
     if "EmergingMarkets" in views:
         idx = get_indices('Geographic_Focus', 'Emerging Markets')
         if idx:
-            row = np.zeros(n_assets); row[idx] = 1/len(idx)
-            active_views.append((row, 0.06)) # Higher risk, higher view
+            row = np.zeros(n_assets)
+            row[idx] = 1 / len(idx)
+            active_views.append((row, 0.06)) # was 0.18
 
     if "Stability" in views:
         idx_u = get_indices('Sector_Focus', 'Utilities')
         idx_c = get_indices('Sector_Focus', 'Consumer Staples')
         idx = idx_u + idx_c
         if idx:
-            row = np.zeros(n_assets); row[idx] = 1/len(idx)
-            active_views.append((row, 0.02)) 
+            row = np.zeros(n_assets)
+            row[idx] = 1 / len(idx)
+            active_views.append((row, 0.02)) # was 0.10
 
     if "HighYield" in views:
         idx = get_indices('ETF_General_Type', 'Bond')
         if idx:
-            row = np.zeros(n_assets); row[idx] = 1/len(idx)
-            active_views.append((row, 0.03)) 
+            row = np.zeros(n_assets)
+            row[idx] = 1 / len(idx)
+            active_views.append((row, 0.03)) # was 0.08
 
     if not active_views:
         return mu_prior
 
     P = np.array([v[0] for v in active_views])
     Q = np.array([v[1] for v in active_views]).reshape(-1, 1)
-    
-    # Uncertainty matrix Omega - Proportional to Prior Variance
     omega = np.diag(np.diag(P @ (tau * cov.values) @ P.T))
     
     try:
@@ -262,7 +323,6 @@ def optimize_portfolio(mu, cov, lambda_risk):
     n = len(mu)
     w0 = np.ones(n) / n
     
-    # Maximize Utility: E[r] - lambda * Var
     def objective(w):
         ret = w @ mu
         var = w @ cov @ w
@@ -270,9 +330,9 @@ def optimize_portfolio(mu, cov, lambda_risk):
 
     cons = ({'type': 'eq', 'fun': lambda w: np.sum(w) - 1.0})
     
-    # MODIFIED: Relaxed bounds to avoid over-constraining the solver.
-    # Allowing 0% to 100% allows the risk parameter (lambda) to actually do its job.
-    # Strict bounds like (0.05, 0.40) often make the problem mathematically impossible.
+    # --------------------------------------------------------
+    # MODIFICATION 2: Relaxed bounds to 0.0-1.0 to fix over-constraint
+    # --------------------------------------------------------
     bounds = [(0.0, 1.0) for _ in range(n)]
 
     res = minimize(objective, w0, method='SLSQP', bounds=bounds, constraints=cons)
@@ -280,7 +340,7 @@ def optimize_portfolio(mu, cov, lambda_risk):
     status = {
         "success": res.success,
         "message": res.message,
-        "weights": pd.Series(res.x, index=mu.index) if res.success else pd.Series(w0, index=mu.index)
+        "weights": pd.Series(res.x, index=mu.index) if res.success else pd.Series(np.ones(n)/n, index=mu.index)
     }
     return status
 
@@ -288,26 +348,96 @@ def optimize_portfolio(mu, cov, lambda_risk):
 # 📄 MAIN LAYOUT
 # ============================================================
 
-st.title("Deco-Robo: The DIY ETF Kit")
-st.markdown("#### Customized Portfolio Construction for Canadian Investors")
+# Header Area
+st.title("ETF Robo Advisor")
+st.markdown("#### Empowering Canadian Investors with Institutional-Grade Tools")
 st.markdown("---")
 
+# Create Tabs
 tab_tool, tab_edu = st.tabs(["🛠️ Robo-Advisor Tool", "📚 Education Center"])
+
+# ============================================================
+# 📚 TAB 2: EDUCATION CENTER
+# ============================================================
+with tab_edu:
+    st.header("ETF Education Center")
+    st.caption("Master the basics before you invest.")
+    
+    col1, col2 = st.columns([2, 1])
+    
+    with col1:
+        with st.expander("1. What is an ETF?", expanded=True):
+            st.markdown("""
+            **Exchange-Traded Fund (ETF)** is a basket of securities that trades on an exchange just like a stock.
+            - **Diversification:** One ETF can hold thousands of stocks or bonds.
+            - **Liquidity:** Trade anytime during market hours.
+            - **Transparency:** Holdings are disclosed daily.
+            """)
+            
+        with st.expander("2. How are ETFs Created? (The Mechanism)"):
+            st.markdown("""
+            ETFs rely on **Authorized Participants (APs)** to keep prices fair.
+            1. **Creation:** AP buys underlying stocks → Delivers to Issuer → Gets ETF shares.
+            2. **Redemption:** AP returns ETF shares → Gets underlying stocks.
+            
+            *This arbitrage mechanism ensures the ETF price stays close to its Net Asset Value (NAV).*
+            """)
+            if os.path.exists("image_a63b46.png"):
+                st.image("image_a63b46.png", caption="Creation/Redemption Process")
+
+        with st.expander("3. Canadian ETF Landscape"):
+            st.info("Did you know? The Canadian ETF market exceeds **$600 Billion** in assets.")
+            st.markdown("""
+            - **Regulation:** Governed by *National Instrument 81-102*.
+            - **Taxation:** ETFs are tax-efficient but don't have the exact same capital gains deferral structure as US ETFs.
+            - **Major Players:** RBC iShares, BMO, Vanguard Canada.
+            """)
+
+    with col2:
+        st.markdown("#### Quick Glossary")
+        st.info("""
+        **AUM (Assets Under Management):**
+        The total market value of the investments that a person or entity handles on behalf of investors.
+        
+        **MER (Management Expense Ratio):**
+        The total annual fee charged to manage the fund, expressed as a percentage.
+        
+        **NAV (Net Asset Value):**
+        The total value of the fund's assets minus its liabilities.
+        
+        **Yield:**
+        The income returned on an investment, such as the interest received or dividends earned.
+        """)
 
 # ============================================================
 # 🛠️ TAB 1: THE TOOL
 # ============================================================
 with tab_tool:
+    
+    # --- SIDEBAR FILTERS ---
     with st.sidebar:
         st.header("1. Asset Selection")
         
-        region_mode = st.radio("Select Focus", ["Canadian", "Global / US"], horizontal=True)
+        # Debug info toggle (hidden by default for cleaner UI)
+        if st.checkbox("Show Data Diagnostics"):
+            with st.expander("Debug Info"):
+                st.write(f"Info Sheets Loaded: {len(info_sheets)}")
+                st.write(f"Price Sheets Loaded: {len(price_sheets)}")
+                st.write("Active Pairs:", list(info_sheets.keys()))
+
+        # 1. Region
+        st.markdown('<div class="section-header">Region</div>', unsafe_allow_html=True)
+        region_mode = st.radio("Select Focus", ["Canadian", "Global / US"], horizontal=True, label_visibility="collapsed")
         
+        # 2. Asset Class & Dataset Selection
+        st.markdown('<div class="section-header">Category</div>', unsafe_allow_html=True)
         if region_mode == "Canadian":
             base_key = "canadian"
-            asset_type = "All"
+            asset_type = "All" 
+            st.caption("Accessing full Canadian ETF universe.")
         else:
-            asset_type = st.selectbox("Category", ["Equity (Sector)", "Equity (Thematic)", "Bond (Gov/Corp)", "High Yield"])
+            asset_type = st.selectbox("Select Category", ["Equity (Sector)", "Equity (Thematic)", "Bond (Gov/Corp)", "High Yield"], label_visibility="collapsed")
+            # Use keys from SHEET_PAIRS
             key_map = {
                 "Equity (Sector)": "sector_etfs",
                 "Equity (Thematic)": "thematic",
@@ -316,206 +446,235 @@ with tab_tool:
             }
             base_key = key_map[asset_type]
 
+        # 3. Load Data
         df_info = info_sheets.get(base_key, pd.DataFrame()).copy()
         
-        # --- FILTERS ---
+        if df_info.empty:
+            st.error(f"Data not found for key: {base_key}")
+            st.stop()
+
+        # 4. MASTER FILTER LOGIC
         st.markdown('<div class="section-header">Refine Selection</div>', unsafe_allow_html=True)
         active_filters = {}
-        potential_filters = ["Management_Style", "ESG_Focus", "Sector_Focus", "Geographic_Focus"]
         
+        potential_filters = [
+            "Management_Style", "ESG_Focus", "Issuer", "structure", 
+            "Use_Derivative", "ETF_General_Type", "Strategic_Focus", 
+            "Sector_Focus", "Theme_Focus", "Geographic_Focus",
+            "Exchange_Region", "Leverage_Type"
+        ]
+        
+        # Create filters without cluttering the UI
+        count_filters = 0
         for col in potential_filters:
             col_match = next((c for c in df_info.columns if c.lower() == col.lower()), None)
             if col_match:
                 unique_vals = sorted([str(x).strip() for x in df_info[col_match].dropna().unique() if str(x).strip() != ""])
                 if unique_vals:
-                    sel = st.selectbox(col_match.replace("_", " "), ["All"] + unique_vals, key=f"filt_{base_key}_{col_match}")
+                    count_filters += 1
+                    unique_vals = ["All"] + unique_vals
+                    label = col_match.replace("_", " ").replace("exposure", "").title()
+                    sel = st.selectbox(label, unique_vals, key=f"filt_{base_key}_{col_match}")
                     if sel != "All":
                         active_filters[col_match] = sel
         
-        st.markdown("---")
-        st.markdown('<div class="section-header">Rebalancing Strategy</div>', unsafe_allow_html=True)
-        rebal_freq = st.selectbox(
-            "Frequency", 
-            ["Quarterly", "Annually"], 
-            help="How often will you reset your portfolio to these weights?"
-        )
+        if count_filters == 0:
+            st.info("No additional filters available for this category.")
 
-    # --- MAIN CONTENT ---
+        # --------------------------------------------------------
+        # MODIFICATION 4: Rebalancing Selector
+        # --------------------------------------------------------
+        st.markdown('<div class="section-header">Strategy Settings</div>', unsafe_allow_html=True)
+        rebal_freq = st.selectbox("Rebalancing Frequency", ["Quarterly", "Annually"])
+
+    # --- MAIN CONTENT AREA ---
     
     # 1. Apply Filters
     filtered_df = df_info.copy()
     for col, val in active_filters.items():
         filtered_df = filtered_df[filtered_df[col].astype(str).str.strip() == val]
 
-    # 2. SELECTION LOGIC (LIQUIDITY + COST)
-    st.subheader("2. Smart Selection (Liquidity & Cost)")
+    # 2. Display Screening Results
+    st.subheader("2. Screening Results")
     
-    vol_col = get_volume_col(filtered_df)
-    exp_col = get_expense_col(filtered_df)
+    col_count, col_msg = st.columns([1, 3])
+    with col_count:
+        st.metric("ETFs Found", len(filtered_df))
     
     if filtered_df.empty:
-        st.warning("No ETFs match your filters.")
+        st.warning("No ETFs match your filters. Please adjust your selection in the sidebar.")
     else:
-        # Preprocessing for Ranking
-        scoring_df = filtered_df.copy()
+        # Dynamic Column Display
+        vol_col_display = get_volume_col(filtered_df)
+        exp_col_display = get_expense_col(filtered_df)
+        disp_cols = ["ticker", "name", "Expense_Ratio", "YTD_Return"]
+        if vol_col_display and vol_col_display not in disp_cols: disp_cols.append(vol_col_display)
         
-        # Clean numeric columns
-        if vol_col:
-            scoring_df[vol_col] = pd.to_numeric(scoring_df[vol_col], errors='coerce').fillna(0)
-        else:
-            scoring_df['dummy_vol'] = 1 # Fallback
-            vol_col = 'dummy_vol'
-
-        if exp_col:
-            scoring_df[exp_col] = pd.to_numeric(scoring_df[exp_col], errors='coerce').fillna(0.99) # Fill NaN with high cost
-        else:
-            scoring_df['dummy_exp'] = 0.5
-            exp_col = 'dummy_exp'
-            
-        # --- SCORING ALGORITHM ---
-        # 1. Volume Score (Higher is better). Min-Max Scaling.
-        v_min, v_max = scoring_df[vol_col].min(), scoring_df[vol_col].max()
-        if v_max - v_min > 0:
-            scoring_df['score_vol'] = (scoring_df[vol_col] - v_min) / (v_max - v_min)
-        else:
-            scoring_df['score_vol'] = 0.5
-
-        # 2. Cost Score (Lower is better). Inverted Min-Max.
-        c_min, c_max = scoring_df[exp_col].min(), scoring_df[exp_col].max()
-        if c_max - c_min > 0:
-            scoring_df['score_cost'] = 1 - ((scoring_df[exp_col] - c_min) / (c_max - c_min))
-        else:
-            scoring_df['score_cost'] = 0.5
-            
-        # 3. Composite Score (50/50)
-        scoring_df['final_score'] = 0.5 * scoring_df['score_vol'] + 0.5 * scoring_df['score_cost']
+        final_disp_cols = [c for c in disp_cols if c in filtered_df.columns]
         
-        # Select Top 15
-        top_candidates = scoring_df.sort_values(by='final_score', ascending=False).head(15)
-        
-        col_res1, col_res2 = st.columns([3, 1])
-        with col_res1:
-            st.dataframe(
-                top_candidates[[get_ticker_col(top_candidates), 'name', exp_col, vol_col]], 
-                use_container_width=True, 
-                hide_index=True
-            )
-        with col_res2:
-            st.info(f"**Selection Logic:**\n\nWe analyzed {len(filtered_df)} ETFs.\n\nTop 15 selected based on:\n\n🔹 50% High Liquidity\n🔹 50% Low Cost")
+        with st.expander("View ETF Table", expanded=True):
+            st.dataframe(filtered_df[final_disp_cols].head(50), use_container_width=True, hide_index=True)
+            st.caption(f"Showing matches: {len(filtered_df)}")
 
-        # 3. OPTIMIZATION SETUP
+        # 3. Black-Litterman & Optimization
         st.markdown("---")
         st.subheader("3. Portfolio Construction")
+        st.caption("We use the Black-Litterman model to combine historical data with your personal market views.")
         
-        c_risk, c_views = st.columns([1, 1])
+        # Layout for inputs
+        col_risk, col_views = st.columns([1, 2])
         
-        with c_risk:
-            st.markdown("#### Risk Attitude")
+        with col_risk:
+            st.markdown("#### Your Risk Profile")
             risk_level = st.select_slider(
-                "Risk Aversion",
+                "Select your comfort level:",
                 options=["Conservative", "Moderate", "Aggressive"],
                 value="Moderate"
             )
             lambdas = {"Conservative": 5.0, "Moderate": 2.5, "Aggressive": 1.0}
             
-        with c_views:
+            st.info(f"**Strategy:** {risk_level} optimization focuses on {'capital preservation' if risk_level=='Conservative' else 'growth' if risk_level=='Aggressive' else 'balanced returns'}.")
+            
+        with col_views:
+            # --------------------------------------------------------
+            # MODIFICATION 3: Friendly Header
+            # --------------------------------------------------------
             st.markdown("#### Investor Personal Views of the Market")
-            st.caption("Apply your own outlook (Black-Litterman Model)")
+            st.caption("Select any specific outlooks you have for the market:")
             
             views = []
-            cc1, cc2 = st.columns(2)
-            if cc1.checkbox("Tech Boom (+5%)"): views.append("Tech")
-            if cc1.checkbox("Energy Slump (-3%)"): views.append("Energy")
-            if cc1.checkbox("NA Growth (+4%)"): views.append("NorthAmerica")
-            if cc2.checkbox("EM Rally (+6%)"): views.append("EmergingMarkets")
-            if cc2.checkbox("Defensive (+2%)"): views.append("Stability")
-            if cc2.checkbox("Yield Spike (+3%)"): views.append("HighYield")
+            c1, c2 = st.columns(2)
+            
+            if c1.checkbox("Tech Boom (+5%)"): views.append("Tech")
+            if c1.checkbox("Energy Slump (-3%)"): views.append("Energy")
+            if c1.checkbox("NA Strength (+4%)"): views.append("NorthAmerica")
+            if c2.checkbox("EM Rally (+6%)"): views.append("EmergingMarkets")
+            if c2.checkbox("Stability (+2%)"): views.append("Stability")
+            if c2.checkbox("High Yield (+3%)"): views.append("High Yield")
 
-        if st.button("🚀 Generate Optimized Portfolio", type="primary", use_container_width=True):
-            with st.spinner("Calculating Efficient Frontier & Adjusting for Views..."):
-                
-                # A. Prepare Data
-                ticker_col = get_ticker_col(top_candidates)
-                tickers = top_candidates[ticker_col].astype(str).tolist()
-                
-                prices, found, missing = get_prices_for(base_key, tickers)
-                
-                if len(found) < 3:
-                    st.error("Not enough price data found to optimize.")
+        st.write("") # Spacer
+        
+        # 4. Run Optimization Button
+        # Centered button for better UX
+        col_spacer1, col_btn, col_spacer2 = st.columns([1, 2, 1])
+        with col_btn:
+            run_btn = st.button("🚀 Generate Optimized Portfolio", type="primary", use_container_width=True)
+
+        if run_btn:
+            with st.spinner("Crunching numbers... (Calculating Covariance, BL Posteriors, Efficient Frontier)"):
+                # A. Get Data
+                ticker_col = get_ticker_col(filtered_df)
+                if not ticker_col:
+                    st.error("Could not find ticker column.")
                     st.stop()
-                    
-                # B. Statistics
+                
+                # --------------------------------------------------------
+                # MODIFICATION 1: 50/50 Liquidity/Cost Score Logic
+                # --------------------------------------------------------
+                scoring_df = filtered_df.copy()
+                
+                # Volume Logic
+                vol_col = get_volume_col(scoring_df)
+                if vol_col:
+                    scoring_df[vol_col] = pd.to_numeric(scoring_df[vol_col], errors='coerce').fillna(0)
+                    v_min, v_max = scoring_df[vol_col].min(), scoring_df[vol_col].max()
+                    if v_max - v_min > 0:
+                        scoring_df['score_vol'] = (scoring_df[vol_col] - v_min) / (v_max - v_min)
+                    else:
+                        scoring_df['score_vol'] = 0.5
+                else:
+                    st.warning("Volume column not found, using pure cost/default for volume score.")
+                    scoring_df['score_vol'] = 0.5
+
+                # Cost Logic
+                exp_col = get_expense_col(scoring_df)
+                if exp_col:
+                    scoring_df[exp_col] = pd.to_numeric(scoring_df[exp_col], errors='coerce').fillna(0.99)
+                    c_min, c_max = scoring_df[exp_col].min(), scoring_df[exp_col].max()
+                    # Invert because lower cost is better
+                    if c_max - c_min > 0:
+                        scoring_df['score_cost'] = 1 - ((scoring_df[exp_col] - c_min) / (c_max - c_min))
+                    else:
+                        scoring_df['score_cost'] = 0.5
+                else:
+                    scoring_df['score_cost'] = 0.5
+
+                # Final Composite Score
+                scoring_df['final_score'] = 0.5 * scoring_df['score_vol'] + 0.5 * scoring_df['score_cost']
+                
+                # Take Top 15
+                top_liquid = scoring_df.sort_values(by='final_score', ascending=False).head(15)
+
+                tickers = top_liquid[ticker_col].astype(str).tolist()
+                
+                # --- SMART DATA MATCHING ---
+                prices, found_tickers, missing_tickers = get_prices_for(base_key, tickers)
+                
+                # Check logic: Why did we fall below 5 assets?
+                if len(found_tickers) < 3:
+                    st.error(f"Optimization Failed: Only {len(found_tickers)} valid price histories were found.")
+                    with st.expander("View Missing Data Details"):
+                        st.write(f"**Missing Tickers:** {missing_tickers}")
+                    st.stop()
+
+                if len(prices) < 10: 
+                    st.error("Optimization Failed: Insufficient overlapping price history.")
+                    st.stop()
+
+                # B. Calculate Stats
                 mu_hist, cov = calculate_metrics(prices)
                 
-                # C. Black-Litterman
-                mu_bl = black_litterman_adjustment(mu_hist, cov, views, top_candidates)
+                if mu_hist is None or mu_hist.isnull().values.any():
+                    st.error("Optimization Failed: Covariance matrix contains NaNs.")
+                    st.stop()
+                
+                # C. Apply Black-Litterman
+                mu_bl = black_litterman_adjustment(mu_hist, cov, views, top_liquid)
                 
                 # D. Optimize
-                res = optimize_portfolio(mu_bl, cov, lambdas[risk_level])
+                result = optimize_portfolio(mu_bl, cov, lambdas[risk_level])
+                weights_full = result["weights"]
                 
-                if not res['success']:
-                    st.warning("Optimizer struggled to converge perfectly, but found a solution.")
+                if not result["success"]:
+                    st.warning(f"Optimization Warning: Solver failed to converge. (Reason: {result['message']})")
                 
-                weights = res['weights']
-                clean_weights = weights[weights > 0.001]
+                # E. Display Results
+                weights_display = weights_full[weights_full > 0.001].sort_values(ascending=False)
                 
-                # E. Calculate Weighted Expense Ratio (MER)
-                # Formula: Sum(Weight * MER)
-                matched_indices = [top_candidates.index[top_candidates[ticker_col] == t].tolist()[0] for t in clean_weights.index]
-                # Ensure we use the numeric column we created earlier
-                mer_values = top_candidates.loc[matched_indices, exp_col].values 
-                weight_values = clean_weights.values
-                portfolio_mer = np.sum(weight_values * mer_values)
+                st.success("✅ Optimization Complete!")
                 
-                # F. Display
-                st.success("Optimization Successful!")
+                r_col, m_col = st.columns([1, 2])
                 
-                col_left, col_right = st.columns([1, 2])
-                
-                with col_left:
-                    st.markdown("#### Allocation")
-                    # Format as percentage
-                    w_disp = pd.DataFrame({
-                        "Ticker": clean_weights.index,
-                        "Weight": clean_weights.values
-                    })
-                    w_disp["Weight %"] = (w_disp["Weight"] * 100).map("{:.1f}%".format)
-                    st.dataframe(w_disp[["Ticker", "Weight %"]], hide_index=True)
+                with r_col:
+                    st.markdown("#### Your Portfolio")
+                    w_df = pd.DataFrame({"Ticker": weights_display.index, "Weight": weights_display.values})
+                    w_df["Weight"] = w_df["Weight"].apply(lambda x: f"{x:.1%}")
+                    st.dataframe(w_df, hide_index=True, use_container_width=True)
                     
-                with col_right:
-                    st.markdown("#### Portfolio Metrics")
-                    ret = weights @ mu_bl
-                    vol = np.sqrt(weights @ cov @ weights)
-                    sharpe = ret / vol
-                    
-                    m1, m2, m3, m4 = st.columns(4)
-                    m1.metric("Exp. Return", f"{ret:.1%}")
-                    m2.metric("Volatility", f"{vol:.1%}")
-                    m3.metric("Sharpe Ratio", f"{sharpe:.2f}")
-                    m4.metric("Weighted Cost", f"{portfolio_mer:.2f}%", help="Weighted Average Expense Ratio")
-                    
-                    st.caption(f"📅 **Rebalancing Strategy:** {rebal_freq}")
-                    if rebal_freq == "Quarterly":
-                        st.caption("*Recommended: Review and adjust weights every 3 months to maintain these risk characteristics.*")
-                    else:
-                        st.caption("*Recommended: Review annually. Lower maintenance, but higher potential for risk drift.*")
-                        
-                    st.bar_chart(clean_weights)
+                with m_col:
+                    st.markdown("#### Portfolio Stats")
+                    port_ret = weights_full @ mu_bl
+                    port_vol = np.sqrt(weights_full @ cov @ weights_full)
+                    sharpe = port_ret / port_vol
 
-# ============================================================
-# 📚 TAB 2: EDUCATION (Static Content)
-# ============================================================
-with tab_edu:
-    st.header("ETF Knowledge Base")
-    st.markdown("""
-    ### 1. Understanding Costs
-    **Expense Ratio (MER):** The annual fee charged by the fund.
-    * *Why it matters:* In our tool, we prioritize lower cost funds. A 2% fee reduces your returns significantly over 20 years compared to a 0.2% fee.
-    
-    ### 2. Liquidity
-    **Trading Volume:** How easily you can buy or sell the ETF.
-    * *Why it matters:* Low volume ETFs can have large "bid-ask spreads," costing you extra money when you trade.
-    
-    ### 3. Black-Litterman Model
-    This tool uses the **Black-Litterman** optimization model. Unlike basic Mean-Variance (which relies purely on past data), this model allows you to input your **personal views** (e.g., "I think Tech will boom"). It mathematically blends history with your intuition.
-    """)
+                    # --------------------------------------------------------
+                    # MODIFICATION 5: Weighted MER Calculation
+                    # --------------------------------------------------------
+                    portfolio_mer = 0.0
+                    if exp_col:
+                        matched_indices = [top_liquid.index[top_liquid[ticker_col] == t].tolist()[0] for t in weights_display.index]
+                        mer_values = top_liquid.loc[matched_indices, exp_col].values
+                        portfolio_mer = np.sum(weights_display.values * mer_values)
+                    
+                    k1, k2, k3, k4 = st.columns(4)
+                    k1.metric("Exp. Return", f"{port_ret:.1%}", delta="Annualized")
+                    k2.metric("Volatility", f"{port_vol:.1%}", delta_color="inverse")
+                    k3.metric("Sharpe Ratio", f"{sharpe:.2f}")
+                    k4.metric("Weighted Cost", f"{portfolio_mer:.2f}%", help="Weighted Average Expense Ratio")
+                    
+                    st.bar_chart(weights_display)
+                    st.caption(f"📅 **Rebalancing Strategy:** {rebal_freq} (Recommended to minimize drift)")
+
+# Footer
+st.markdown("---")
+st.caption("© 2025 Deco-Robo. Built for MFIN 706. Powered by Python & Streamlit.")
