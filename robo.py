@@ -238,8 +238,8 @@ def calculate_metrics(prices: pd.DataFrame, freq: int = 252):
     cov = cov + np.eye(cov.shape[0]) * 1e-6 
     return mu, cov
 
-def black_litterman_adjustment(mu_prior, cov, views, ticker_info):
-    tau = 0.05  # Adjusted from 0.025 to standard
+def black_litterman_adjustment(mu_prior, cov, views, ticker_info, view_confidence=0.5):
+    tau = 0.05  # Standard tau
     n_assets = len(mu_prior)
     tickers = mu_prior.index.tolist()
     active_views = [] 
@@ -307,8 +307,20 @@ def black_litterman_adjustment(mu_prior, cov, views, ticker_info):
 
     P = np.array([v[0] for v in active_views])
     Q = np.array([v[1] for v in active_views]).reshape(-1, 1)
+    
+    # Uncertainty matrix Omega
+    # Base calculation proportional to prior variance
     omega = np.diag(np.diag(P @ (tau * cov.values) @ P.T))
     
+    # --------------------------------------------------------
+    # MODIFICATION 2: Apply User Confidence to Uncertainty
+    # --------------------------------------------------------
+    # If confidence is 1.0 (100%), uncertainty (omega) is normal.
+    # If confidence is 0.1 (10%), uncertainty is multiplied by 10 (view is ignored).
+    safe_conf = max(view_confidence, 0.01) # Avoid div by zero
+    scaler = 1.0 / safe_conf
+    omega = omega * scaler
+
     try:
         sigma_inv = np.linalg.inv(tau * cov.values)
         omega_inv = np.linalg.inv(omega)
@@ -331,9 +343,19 @@ def optimize_portfolio(mu, cov, lambda_risk):
     cons = ({'type': 'eq', 'fun': lambda w: np.sum(w) - 1.0})
     
     # --------------------------------------------------------
-    # MODIFICATION 2: Relaxed bounds to 0.0-1.0 to fix over-constraint
+    # MODIFICATION 3: Force Diversification (Min 5 ETFs)
     # --------------------------------------------------------
-    bounds = [(0.0, 1.0) for _ in range(n)]
+    # By setting max weight to 0.20, mathematically you need at least 
+    # 5 assets to reach sum(w) = 1.0. (5 * 0.20 = 1.0)
+    # We use 0.20 as the hard cap per asset.
+    max_weight = 0.20
+    
+    # Safety check: if we have fewer than 5 assets (e.g. data issues), 
+    # we must relax this or solver fails.
+    if n < 5:
+        max_weight = 1.0 / n
+        
+    bounds = [(0.0, max_weight) for _ in range(n)]
 
     res = minimize(objective, w0, method='SLSQP', bounds=bounds, constraints=cons)
     
@@ -551,6 +573,16 @@ with tab_tool:
             if c2.checkbox("EM Rally (+6%)"): views.append("EmergingMarkets")
             if c2.checkbox("Stability (+2%)"): views.append("Stability")
             if c2.checkbox("High Yield (+3%)"): views.append("High Yield")
+            
+            # --------------------------------------------------------
+            # MODIFICATION 2: View Confidence Slider
+            # --------------------------------------------------------
+            st.markdown("---")
+            view_conf = st.slider(
+                "How confident are you in these views?",
+                min_value=0.0, max_value=1.0, value=0.5, step=0.1,
+                help="Higher confidence means your views will have a stronger impact on the portfolio weights."
+            )
 
         st.write("") # Spacer
         
@@ -629,7 +661,8 @@ with tab_tool:
                     st.stop()
                 
                 # C. Apply Black-Litterman
-                mu_bl = black_litterman_adjustment(mu_hist, cov, views, top_liquid)
+                # MODIFICATION: Pass view confidence
+                mu_bl = black_litterman_adjustment(mu_hist, cov, views, top_liquid, view_confidence)
                 
                 # D. Optimize
                 result = optimize_portfolio(mu_bl, cov, lambdas[risk_level])
@@ -658,7 +691,7 @@ with tab_tool:
                     sharpe = port_ret / port_vol
 
                     # --------------------------------------------------------
-                    # MODIFICATION 5: Weighted MER Calculation
+                    # MODIFICATION 5: Weighted MER + Rebalancing Cost
                     # --------------------------------------------------------
                     portfolio_mer = 0.0
                     if exp_col:
@@ -666,14 +699,24 @@ with tab_tool:
                         mer_values = top_liquid.loc[matched_indices, exp_col].values
                         portfolio_mer = np.sum(weights_display.values * mer_values)
                     
+                    # MODIFICATION 1: Rebalancing Cost Impact
+                    # Quarterly = Higher Turnover (~0.20% estimated drag)
+                    # Annually = Lower Turnover (~0.05% estimated drag)
+                    trading_cost_est = 0.0020 if rebal_freq == "Quarterly" else 0.0005
+                    net_return = port_ret - trading_cost_est
+                    
                     k1, k2, k3, k4 = st.columns(4)
-                    k1.metric("Exp. Return", f"{port_ret:.1%}", delta="Annualized")
+                    k1.metric("Net Exp. Return", f"{net_return:.1%}", delta=f"-{trading_cost_est:.2%} Trading Cost")
                     k2.metric("Volatility", f"{port_vol:.1%}", delta_color="inverse")
                     k3.metric("Sharpe Ratio", f"{sharpe:.2f}")
-                    k4.metric("Weighted Cost", f"{portfolio_mer:.2f}%", help="Weighted Average Expense Ratio")
+                    k4.metric("Weighted MER", f"{portfolio_mer:.2f}%", help="Weighted Average Expense Ratio")
                     
                     st.bar_chart(weights_display)
-                    st.caption(f"📅 **Rebalancing Strategy:** {rebal_freq} (Recommended to minimize drift)")
+                    st.caption(f"📅 **Rebalancing Strategy:** {rebal_freq}")
+                    if rebal_freq == "Quarterly":
+                        st.caption("*Optimization Note: Quarterly rebalancing incurs higher estimated trading costs (0.20%), reducing your net return slightly, but keeps risk tighter.*")
+                    else:
+                        st.caption("*Optimization Note: Annual rebalancing saves trading costs (est. 0.05%), but allows portfolio risk to drift further from targets.*")
 
 # Footer
 st.markdown("---")
