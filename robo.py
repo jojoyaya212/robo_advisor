@@ -175,6 +175,12 @@ def get_expense_col(df: pd.DataFrame) -> str | None:
         if c in df.columns: return c
     return None
 
+def clean_percentage_col(series):
+    """Cleans a column that might be strings with % signs."""
+    if series.dtype == 'object':
+        return series.astype(str).str.replace('%', '', regex=False).apply(pd.to_numeric, errors='coerce')
+    return pd.to_numeric(series, errors='coerce')
+
 def ultra_clean_ticker(t):
     """Aggressive cleaner: removes ALL spaces and common suffixes."""
     t = str(t).upper()
@@ -255,36 +261,33 @@ def black_litterman_adjustment(mu_prior, cov, views, ticker_info, view_confidenc
                 indices.append(i)
         return indices
 
-    # --------------------------------------------------------
-    # MODIFICATION 3: Adjusted Views to be realistic (5% range)
-    # --------------------------------------------------------
     if "Tech" in views:
         idx = get_indices('Sector_Focus', 'Technology')
         if idx:
             row = np.zeros(n_assets)
             row[idx] = 1 / len(idx)
-            active_views.append((row, 0.05)) # was 0.25
+            active_views.append((row, 0.05)) 
 
     if "Energy" in views:
         idx = get_indices('Sector_Focus', 'Energy')
         if idx:
             row = np.zeros(n_assets)
             row[idx] = 1 / len(idx)
-            active_views.append((row, -0.03)) # was -0.05
+            active_views.append((row, -0.03)) 
 
     if "NorthAmerica" in views:
         idx = get_indices('Geographic_Focus', 'North America')
         if idx:
             row = np.zeros(n_assets)
             row[idx] = 1 / len(idx)
-            active_views.append((row, 0.04)) # was 0.15
+            active_views.append((row, 0.15)) 
 
     if "EmergingMarkets" in views:
         idx = get_indices('Geographic_Focus', 'Emerging Markets')
         if idx:
             row = np.zeros(n_assets)
             row[idx] = 1 / len(idx)
-            active_views.append((row, 0.06)) # was 0.18
+            active_views.append((row, 0.06)) 
 
     if "Stability" in views:
         idx_u = get_indices('Sector_Focus', 'Utilities')
@@ -293,14 +296,14 @@ def black_litterman_adjustment(mu_prior, cov, views, ticker_info, view_confidenc
         if idx:
             row = np.zeros(n_assets)
             row[idx] = 1 / len(idx)
-            active_views.append((row, 0.02)) # was 0.10
+            active_views.append((row, 0.02)) 
 
     if "HighYield" in views:
         idx = get_indices('ETF_General_Type', 'Bond')
         if idx:
             row = np.zeros(n_assets)
             row[idx] = 1 / len(idx)
-            active_views.append((row, 0.03)) # was 0.08
+            active_views.append((row, 0.03)) 
 
     if not active_views:
         return mu_prior
@@ -309,14 +312,8 @@ def black_litterman_adjustment(mu_prior, cov, views, ticker_info, view_confidenc
     Q = np.array([v[1] for v in active_views]).reshape(-1, 1)
     
     # Uncertainty matrix Omega
-    # Base calculation proportional to prior variance
     omega = np.diag(np.diag(P @ (tau * cov.values) @ P.T))
     
-    # --------------------------------------------------------
-    # MODIFICATION 2: Apply User Confidence to Uncertainty
-    # --------------------------------------------------------
-    # If confidence is 1.0 (100%), uncertainty (omega) is normal.
-    # If confidence is 0.1 (10%), uncertainty is multiplied by 10 (view is ignored).
     safe_conf = max(view_confidence, 0.01) # Avoid div by zero
     scaler = 1.0 / safe_conf
     omega = omega * scaler
@@ -342,16 +339,8 @@ def optimize_portfolio(mu, cov, lambda_risk):
 
     cons = ({'type': 'eq', 'fun': lambda w: np.sum(w) - 1.0})
     
-    # --------------------------------------------------------
-    # MODIFICATION 3: Force Diversification (Min 5 ETFs)
-    # --------------------------------------------------------
-    # By setting max weight to 0.20, mathematically you need at least 
-    # 5 assets to reach sum(w) = 1.0. (5 * 0.20 = 1.0)
-    # We use 0.20 as the hard cap per asset.
+    # 20% max weight per asset to force diversification (min 5 assets)
     max_weight = 0.20
-    
-    # Safety check: if we have fewer than 5 assets (e.g. data issues), 
-    # we must relax this or solver fails.
     if n < 5:
         max_weight = 1.0 / n
         
@@ -558,9 +547,6 @@ with tab_tool:
             st.info(f"**Strategy:** {risk_level} optimization focuses on {'capital preservation' if risk_level=='Conservative' else 'growth' if risk_level=='Aggressive' else 'balanced returns'}.")
             
         with col_views:
-            # --------------------------------------------------------
-            # MODIFICATION 3: Friendly Header
-            # --------------------------------------------------------
             st.markdown("#### Investor Personal Views of the Market")
             st.caption("Select any specific outlooks you have for the market:")
             
@@ -569,7 +555,8 @@ with tab_tool:
             
             if c1.checkbox("Tech Boom (+5%)"): views.append("Tech")
             if c1.checkbox("Energy Slump (-3%)"): views.append("Energy")
-            if c1.checkbox("NA Strength (+4%)"): views.append("NorthAmerica")
+            # UPDATED TEXT TO FULL NAME
+            if c1.checkbox("North America Strength (+15%)"): views.append("NorthAmerica")
             if c2.checkbox("EM Rally (+6%)"): views.append("EmergingMarkets")
             if c2.checkbox("Stability (+2%)"): views.append("Stability")
             if c2.checkbox("High Yield (+3%)"): views.append("High Yield")
@@ -621,7 +608,9 @@ with tab_tool:
                 # Cost Logic
                 exp_col = get_expense_col(scoring_df)
                 if exp_col:
-                    scoring_df[exp_col] = pd.to_numeric(scoring_df[exp_col], errors='coerce').fillna(0.99)
+                    # UPDATED: CLEAN PERCENTAGE SIGNS
+                    scoring_df[exp_col] = clean_percentage_col(scoring_df[exp_col]).fillna(0.99)
+                    
                     c_min, c_max = scoring_df[exp_col].min(), scoring_df[exp_col].max()
                     # Invert because lower cost is better
                     if c_max - c_min > 0:
@@ -709,7 +698,8 @@ with tab_tool:
                     k1.metric("Net Exp. Return", f"{net_return:.1%}", delta=f"-{trading_cost_est:.2%} Trading Cost")
                     k2.metric("Volatility", f"{port_vol:.1%}", delta_color="inverse")
                     k3.metric("Sharpe Ratio", f"{sharpe:.2f}")
-                    k4.metric("Weighted MER", f"{portfolio_mer:.2f}%", help="Weighted Average Expense Ratio")
+                    # UPDATED LABEL TO FULL NAME
+                    k4.metric("Weighted Management Expense Ratio", f"{portfolio_mer:.2f}%", help="Weighted Average Expense Ratio")
                     
                     st.bar_chart(weights_display)
                     st.caption(f"📅 **Rebalancing Strategy:** {rebal_freq}")
