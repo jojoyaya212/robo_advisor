@@ -662,7 +662,7 @@ with tab_tool:
                 
                 # C. Apply Black-Litterman
                 # MODIFICATION: Pass view confidence
-                mu_bl = black_litterman_adjustment(mu_hist, cov, views, top_liquid, view_confidence)
+                mu_bl = black_litterman_adjustment(mu_hist, cov, views, top_liquid, view_conf)
                 
                 # D. Optimize
                 result = optimize_portfolio(mu_bl, cov, lambdas[risk_level])
