@@ -97,8 +97,8 @@ st.markdown("""
     # Subtle shadow (card effect)
     # Padding inside each card
     
-    /* Override Streamlit button background (specific class from DevTools) */
-    button.st-emotion-cache-1c14umz {
+    /* Override ALL Streamlit primary buttons */
+    button[kind="primary"], div.stButton > button {
         background: linear-gradient(90deg, #4ADE80, #22C55E) !important;
         color: white !important;
         border: none !important;
@@ -106,11 +106,13 @@ st.markdown("""
         padding: 0.8rem 1.4rem !important;
         font-weight: 600 !important;
         box-shadow: 0 2px 6px rgba(0,0,0,0.15) !important;
+        transition: 0.2s ease-in-out !important;
     }
     
     /* Hover */
-    button.st-emotion-cache-1c14umz:hover {
-        filter: brightness(1.1) !important;
+    button[kind="primary"]:hover, div.stButton > button:hover {
+        filter: brightness(1.12) !important;
+        cursor: pointer !important;
     }
     
     # Makes buttons black with white text
