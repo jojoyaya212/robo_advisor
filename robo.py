@@ -328,7 +328,8 @@ def calculate_metrics(prices: pd.DataFrame, freq: int = 252):
     return mu, cov
 
 # ============================================================
-#    BLACK-LITTERMAN POSTERIOR
+#    BLACK-LITTERMAN POSTERIOR (With User Notes Restored)
+# ============================================================
 # Step 1 — Start With What History Says (“Prior returns”)
 # Step 2 — Look at the Client’s Opinions (“Views”)
 # Step 3 — Turn “Views” Into Math (the P and Q matrices)
@@ -353,6 +354,11 @@ def black_litterman_adjustment(mu_prior, cov, views, ticker_info, view_confidenc
                 indices.append(i)
         return indices
 
+    # NEW HELPER: Get historical mean for the specific assets (to make views relative)
+    def get_prior_mean(indices):
+        if not indices: return 0.0
+        return mu_prior.iloc[indices].mean()
+
 # Notes: For each pre-coded view label, call get_indices to find which ETFs in the current candidate universe match.
 # -------- Correct BL view magnitudes matching UI labels --------
         # ============================
@@ -365,7 +371,9 @@ def black_litterman_adjustment(mu_prior, cov, views, ticker_info, view_confidenc
         if idx:
             row = np.zeros(n_assets)
             row[idx] = 1 / len(idx)
-            active_views.append((row, 0.05))
+            # FIX: Add 0.05 to historical average (Relative View)
+            view_return = get_prior_mean(idx) + 0.05
+            active_views.append((row, view_return))
 
     # Energy Slump (-3%)
     if "Energy" in views:
@@ -373,7 +381,9 @@ def black_litterman_adjustment(mu_prior, cov, views, ticker_info, view_confidenc
         if idx:
             row = np.zeros(n_assets)
             row[idx] = 1 / len(idx)
-            active_views.append((row, -0.03))
+            # FIX: Subtract 0.03 from historical average (Relative View)
+            view_return = get_prior_mean(idx) - 0.03
+            active_views.append((row, view_return))
 
     # North America Strength (+15%)
     if "NorthAmerica" in views:
@@ -381,7 +391,9 @@ def black_litterman_adjustment(mu_prior, cov, views, ticker_info, view_confidenc
         if idx:
             row = np.zeros(n_assets)
             row[idx] = 1 / len(idx)
-            active_views.append((row, 0.15))
+            # FIX: Add 0.15 to historical average (Relative View)
+            view_return = get_prior_mean(idx) + 0.15
+            active_views.append((row, view_return))
 
     # Emerging Markets Rally (+6%)  (renamed & expanded logic)
     if "EmergingMarketsRally" in views:
@@ -400,7 +412,9 @@ def black_litterman_adjustment(mu_prior, cov, views, ticker_info, view_confidenc
         if idx:
             row = np.zeros(n_assets)
             row[idx] = 1 / len(idx)
-            active_views.append((row, 0.06))
+            # FIX: Add 0.06 to historical average (Relative View)
+            view_return = get_prior_mean(idx) + 0.06
+            active_views.append((row, view_return))
 
     # Health Care (+2%)
     if "HealthCare" in views:
@@ -408,7 +422,9 @@ def black_litterman_adjustment(mu_prior, cov, views, ticker_info, view_confidenc
         if idx:
             row = np.zeros(n_assets)
             row[idx] = 1 / len(idx)
-            active_views.append((row, 0.02))
+            # FIX: Add 0.02 to historical average (Relative View)
+            view_return = get_prior_mean(idx) + 0.02
+            active_views.append((row, view_return))
 
     # Communication Services (+3%)
     if "CommServices" in views:
@@ -416,7 +432,9 @@ def black_litterman_adjustment(mu_prior, cov, views, ticker_info, view_confidenc
         if idx:
             row = np.zeros(n_assets)
             row[idx] = 1 / len(idx)
-            active_views.append((row, 0.03))
+            # FIX: Add 0.03 to historical average (Relative View)
+            view_return = get_prior_mean(idx) + 0.03
+            active_views.append((row, view_return))
 
     if not active_views:
         return mu_prior  # no change if no active views.
