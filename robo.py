@@ -359,7 +359,7 @@ def black_litterman_adjustment(mu_prior, cov, views, ticker_info, view_confidenc
         if idx:
             row = np.zeros(n_assets)
             row[idx] = 1 / len(idx)
-            active_views.append((row, 0.05)) 
+            active_views.append((row, 0.02)) 
             
     if "Energy" in views:
         idx = get_indices('Sector_Focus', 'Energy')
@@ -373,14 +373,14 @@ def black_litterman_adjustment(mu_prior, cov, views, ticker_info, view_confidenc
         if idx:
             row = np.zeros(n_assets)
             row[idx] = 1 / len(idx)
-            active_views.append((row, 0.15)) 
+            active_views.append((row, 0.03)) 
 
     if "EmergingMarkets" in views:
         idx = get_indices('Geographic_Focus', 'Emerging Markets')
         if idx:
             row = np.zeros(n_assets)
             row[idx] = 1 / len(idx)
-            active_views.append((row, 0.06)) 
+            active_views.append((row, 0.04)) 
 
     if "Stability" in views:
         idx_u = get_indices('Sector_Focus', 'Utilities')
@@ -389,14 +389,14 @@ def black_litterman_adjustment(mu_prior, cov, views, ticker_info, view_confidenc
         if idx:
             row = np.zeros(n_assets)
             row[idx] = 1 / len(idx)
-            active_views.append((row, 0.02)) 
+            active_views.append((row, 0.01)) 
 
     if "HighYield" in views:
         idx = get_indices('ETF_General_Type', 'Bond')
         if idx:
             row = np.zeros(n_assets)
             row[idx] = 1 / len(idx)
-            active_views.append((row, 0.03)) 
+            active_views.append((row, 0.02)) 
 
     if not active_views:
         return mu_prior  # no change if no active views.
