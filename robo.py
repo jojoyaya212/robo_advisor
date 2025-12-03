@@ -690,7 +690,7 @@ with tab_tool:
         # Centered button for better UX
         col_spacer1, col_btn, col_spacer2 = st.columns([1, 2, 1])
         with col_btn:
-            run_btn = st.button(" Generate Optimized Portfolio", type="primary", use_container_width=True)
+            run_btn = st.button(" Generate My Own Optimized Portfolio", type="primary", use_container_width=True)
 
         if run_btn:
             with st.spinner("Crunching numbers... (Calculating Covariance, BL Posteriors, Efficient Frontier)"):
