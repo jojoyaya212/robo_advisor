@@ -118,7 +118,7 @@ st.markdown("""
         transform: translateY(-1px);
         box-shadow: 0 4px 8px rgba(0,0,0,0.15) !important;
     }
-    
+    # used a wealthsimple style botton, but overwrite by streamlit, so it alwasys show red before the click, didn't solve this in the end.
     # Makes buttons black with white text
     # Adds rounded corners
     # Removes the default border
