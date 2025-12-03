@@ -31,16 +31,23 @@ import re
 # Set the page title, icon, layout, sidebar state.
 
 st.set_page_config(
-    page_title="ETF Robo Advisor", 
-    page_icon="✨",
-    layout="wide",
+    page_title="ETF Robo Advisor", # this defines the website page title on browser
+    page_icon="✨",  # add a icon infront of the website title (not the website content, but how the website looks on the browser header bar)
+    layout="wide", 
     initial_sidebar_state="expanded"
 )
 
 # Notes: Custom CSS for a cleaner, more professional look
 # Set font; headings; sidebar; make metrics cars look like "cards" with subtle shadows
 # style buttons, tables and expanders 
-
+# injecting custom CSS styling into a Streamlit to override Streamlit’s default design.
+"""
+CSS = Cascading Style Sheets
+It is the language used to control how things look on a webpage or app.
+HTML = the content
+CSS = the appearance
+JavaScript = the behavior
+"""
 st.markdown("""
     <style>
     /* Main Font */
@@ -49,6 +56,9 @@ st.markdown("""
         color: #333333;
         background-color: #ffffff;
     }
+    # Sets the font of the entire app to Inter/Segoe UI/Helvetica.
+    # Sets the default text color to dark grey (#333).
+    # Sets the background color of the app to white (#fff).
     
     /* Headings */
     h1, h2, h3 {
@@ -56,12 +66,17 @@ st.markdown("""
         color: #111111;
         letter-spacing: -0.5px;
     }
+    # Makes headings bold (700 weight).
+    # Sets heading color darker (#111).
+    # Slight negative letter-spacing makes text more compact and modern.
     
     /* Sidebar Styling */
     section[data-testid="stSidebar"] {
         background-color: #f7f9fc;
         border-right: 1px solid #e0e0e0;
     }
+    # Changes sidebar background to a light soft blue-grey.
+    # Adds a right border to visually separate sidebar and main area.
     
     /* Cards for Stats (Metrics) */
     div[data-testid="stMetric"] {
@@ -76,6 +91,11 @@ st.markdown("""
         transform: translateY(-2px);
         box-shadow: 0 4px 8px rgba(0,0,0,0.1);
     }
+    # White background
+    # Light border
+    # Soft rounded corners
+    # Subtle shadow (card effect)
+    # Padding inside each card
     
     /* Primary Buttons */
     div.stButton > button {
@@ -91,6 +111,11 @@ st.markdown("""
         background-color: #333333;
         color: white;
     }
+    # Makes buttons black with white text
+    # Adds rounded corners
+    # Removes the default border
+    # Adds padding to make them larger
+    # On hover: button becomes lighter black (#333)
     
     /* DataFrame Styling */
     div[data-testid="stDataFrame"] {
@@ -98,14 +123,14 @@ st.markdown("""
         border-radius: 8px;
         overflow: hidden;
     }
-    
+    # this works on the the big white ETF table under “2. Screening Results”
     /* Expanders */
     .streamlit-expanderHeader {
         font-weight: 600;
         background-color: #ffffff;
         border-radius: 5px;
     }
-    
+    # expander titled “View ETF Table”
     /* Custom Header for Sections */
     .section-header {
         font-size: 1.2rem;
@@ -116,6 +141,7 @@ st.markdown("""
         border-bottom: 2px solid #eee;
         padding-bottom: 5px;
     }
+    # headings like “2. Screening Results”, “3. Portfolio Construction”
     </style>
 """, unsafe_allow_html=True)
 
@@ -124,7 +150,7 @@ st.markdown("""
 # ============================================================
 
 # Notes: A single Excel workbook as the data source.
-FILE_PATH = "robo_advisor_data.xlsx"
+FILE_PATH = "robo_advisor_data.xlsx"  # this is the file in github repository
 
 # Notes: EXPLICIT MAPPING: Info Sheet Name -> Price Sheet Name
 # Maps logical categories (e.g., sector_etfs) to the expected sheet names that contain price data (e.g., sector_price).
@@ -137,7 +163,7 @@ SHEET_PAIRS = {
     "canadian": "canadian_price",
     "em_bonds": "em_bonds_price"
 }
-
+# this is mapping the sheets with our website structure
 # Notes: Cathes the loaded workbook to keep the UI responsive
 # Repeated UI actions don’t re-read the file (speeds the demo) with caching and reliable data loading.
 @st.cache_data(show_spinner=False)
@@ -150,7 +176,7 @@ def load_data():
 # Important: Provides a loading spinner and a clear error message if the workbook is not found.
 with st.spinner("Initializing Deco-Robo... Loading market data..."):
     sheets_all = load_data()
-
+# what to show when loading data
 if sheets_all is None:
     st.error(f"❌ Critical Error: Data file `{FILE_PATH}` not found. Please ensure it is in the application folder.")
     st.stop()
@@ -172,6 +198,7 @@ for info_name, price_name in SHEET_PAIRS.items():
     if price_name.lower() in actual_keys:
         real_price_name = actual_keys[price_name.lower()]
         price_sheets[info_name] = sheets_all[real_price_name]
+# reading data into the website
 
 # ============================================================
 # 🧮 HELPER FUNCTIONS
@@ -294,9 +321,14 @@ def calculate_metrics(prices: pd.DataFrame, freq: int = 252):
 
 # ============================================================
 #    BLACK-LITTERMAN POSTERIOR
+# Step 1 — Start With What History Says (“Prior returns”)
+# Step 2 — Look at the Client’s Opinions (“Views”)
+# Step 3 — Turn “Views” Into Math (the P and Q matrices)
+# Step 4 — Ask: “How confident is the user in their view?”
+# Step 5 — Combine History + Views Into One Final Return (the Posterior)
 # ============================================================
 def black_litterman_adjustment(mu_prior, cov, views, ticker_info, view_confidence=0.5):
-    tau = 0.05  # Standard tau
+    tau = 0.05  # Standard tau  # Tau controls how uncertain you believe the market equilibrium returns are, but here we just gave it a initial value, this will change
     n_assets = len(mu_prior)
     tickers = mu_prior.index.tolist()
     active_views = [] 
@@ -404,7 +436,7 @@ def optimize_portfolio(mu, cov, lambda_risk):
 
     cons = ({'type': 'eq', 'fun': lambda w: np.sum(w) - 1.0}) # Enforces full-investment
     
-    # Default to 20% max weight per asset to force diversification (min 5 assets)
+    # Default to 20% max weight per asset to force diversification (min 5 assets), constrain is here
     max_weight = 0.20
     if n < 5:
         max_weight = 1.0 / n # distribute weight evenly (no unrealistic single-ETF concentration when few ETFs).
@@ -427,12 +459,12 @@ def optimize_portfolio(mu, cov, lambda_risk):
 
 # Notes: Create two major tabs: Robot-advisor Tool & Education Center
 # Header Area
-st.title("ETF Robo Advisor")
-st.markdown("#### Empowering Canadian Investors with Institutional-Grade Tools")
+st.title("ETF Robo Advisor")  # website big name/title
+st.markdown("#### Empowering Canadian Investors with Institutional-Grade Tools")  # website slogan
 st.markdown("---")
 
 # Create Tabs
-tab_tool, tab_edu = st.tabs(["🛠️ Robo-Advisor Tool", "📚 Education Center"])
+tab_tool, tab_edu = st.tabs(["🛠️ Robo-Advisor Tool", "📚 Education Center"])  # create the education tab
 
 # ============================================================
 # 📚 TAB 2: EDUCATION CENTER
@@ -528,7 +560,7 @@ with tab_tool:
                 "Bond (Emerging Mkts)": "em_bonds"
             }
             base_key = key_map[asset_type]
-
+# our six tables logic was implemented above
         # 3. Load Data: load metadata for the chosen category.
         df_info = info_sheets.get(base_key, pd.DataFrame()).copy()
         
@@ -642,6 +674,7 @@ with tab_tool:
                 min_value=0.0, max_value=1.0, value=0.5, step=0.1,
                 help="Higher confidence means your views will have a stronger impact on the portfolio weights."
             )
+            # here we fetch confidence, discard the default value if user choose their own confidence.
 
         st.write("") # Spacer
         
