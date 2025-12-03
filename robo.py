@@ -355,50 +355,68 @@ def black_litterman_adjustment(mu_prior, cov, views, ticker_info, view_confidenc
 
 # Notes: For each pre-coded view label, call get_indices to find which ETFs in the current candidate universe match.
 # -------- Correct BL view magnitudes matching UI labels --------
-    if "Tech" in views:               # Tech Boom (+5%)
+        # ============================
+    # DEFINE USER VIEWS (updated labels)
+    # ============================
+
+    # Tech Boom (+5%)
+    if "Tech" in views:
         idx = get_indices('Sector_Focus', 'Technology')
         if idx:
             row = np.zeros(n_assets)
             row[idx] = 1 / len(idx)
             active_views.append((row, 0.05))
-    
-    if "Energy" in views:             # Energy Slump (-3%)
+
+    # Energy Slump (-3%)
+    if "Energy" in views:
         idx = get_indices('Sector_Focus', 'Energy')
         if idx:
             row = np.zeros(n_assets)
             row[idx] = 1 / len(idx)
             active_views.append((row, -0.03))
-    
-    if "NorthAmerica" in views:       # North America Strength (+15%)
+
+    # North America Strength (+15%)
+    if "NorthAmerica" in views:
         idx = get_indices('Geographic_Focus', 'North America')
         if idx:
             row = np.zeros(n_assets)
             row[idx] = 1 / len(idx)
             active_views.append((row, 0.15))
-    
-    if "EmergingMarkets" in views:    # EM Rally (+6%)
-        idx = get_indices('Geographic_Focus', 'Emerging Markets')
+
+    # Emerging Markets Rally (+6%)  (renamed & expanded logic)
+    if "EmergingMarketsRally" in views:
+        idx_geo = get_indices('Geographic_Focus', 'Emerging Markets')
+
+        # add EM bond ETFs (from the separate EM table)
+        if "em_bonds" in info_sheets:
+            ticker_col = get_ticker_col(info_sheets["em_bonds"])
+            bond_list = info_sheets["em_bonds"][ticker_col].apply(ultra_clean_ticker).tolist()
+            idx_bond = [i for i, t in enumerate(tickers) if ultra_clean_ticker(t) in bond_list]
+        else:
+            idx_bond = []
+
+        idx = idx_geo + idx_bond
+
         if idx:
             row = np.zeros(n_assets)
             row[idx] = 1 / len(idx)
             active_views.append((row, 0.06))
-    
-    if "Stability" in views:          # Stability (+2%)
-        idx_u = get_indices('Sector_Focus', 'Utilities')
-        idx_c = get_indices('Sector_Focus', 'Consumer Staples')
-        idx = idx_u + idx_c
+
+    # Health Care (+2%)
+    if "HealthCare" in views:
+        idx = get_indices('Sector_Focus', 'Health Care')
         if idx:
             row = np.zeros(n_assets)
             row[idx] = 1 / len(idx)
             active_views.append((row, 0.02))
-    
-    if "High Yield" in views:         # High Yield (+3%)
-        idx = get_indices('ETF_General_Type', 'Bond')
+
+    # Communication Services (+3%)
+    if "CommServices" in views:
+        idx = get_indices('Sector_Focus', 'Communication Services')
         if idx:
             row = np.zeros(n_assets)
             row[idx] = 1 / len(idx)
             active_views.append((row, 0.03))
-
 
     if not active_views:
         return mu_prior  # no change if no active views.
@@ -669,13 +687,19 @@ with tab_tool:
             
             views = []
             c1, c2 = st.columns(2)
-            
+             
             if c1.checkbox("Tech Boom (+5%)"): views.append("Tech")
             if c1.checkbox("Energy Slump (-3%)"): views.append("Energy")
             if c1.checkbox("North America Strength (+15%)"): views.append("NorthAmerica")
-            if c2.checkbox("EM Rally (+6%)"): views.append("EmergingMarkets")
-            if c2.checkbox("Stability (+2%)"): views.append("Stability")
-            if c2.checkbox("High Yield (+3%)"): views.append("High Yield")
+            
+            # renamed for investor clarity
+            if c2.checkbox("Emerging Markets Rally (+6%)"): 
+                views.append("EmergingMarketsRally")
+            
+            # substituted new categories
+            if c2.checkbox("Health Care (+2%)"): views.append("HealthCare")
+            if c2.checkbox("Communication Services (+3%)"): views.append("CommServices")
+
             
             # View Confidence Slider
             st.markdown("---")
