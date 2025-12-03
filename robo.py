@@ -97,20 +97,24 @@ st.markdown("""
     # Subtle shadow (card effect)
     # Padding inside each card
     
-    /* Primary Buttons */
-    div.stButton > button {
-        background-color: #000000;
-        color: white;
-        border-radius: 8px;
-        font-weight: 600;
-        border: none;
-        padding: 0.6rem 1.2rem;
-        transition: background-color 0.2s;
+    /* Primary Buttons — FinTech Green Gradient */
+    div.stButton > button, button[kind="primary"] {
+        background: linear-gradient(90deg, #4ADE80, #22C55E) !important;
+        color: white !important;
+        border-radius: 8px !important;
+        border: none !important;
+        font-weight: 600 !important;
+        padding: 0.7rem 1.4rem !important;
+        box-shadow: 0 2px 6px rgba(0,0,0,0.1) !important;
+        transition: 0.2s ease-in-out !important;
     }
-    div.stButton > button:hover {
-        background-color: #333333;
-        color: white;
+    
+    /* Hover Effect */
+    div.stButton > button:hover, button[kind="primary"]:hover {
+        filter: brightness(1.1) !important;
+        cursor: pointer !important;
     }
+    
     # Makes buttons black with white text
     # Adds rounded corners
     # Removes the default border
