@@ -97,22 +97,23 @@ st.markdown("""
     # Subtle shadow (card effect)
     # Padding inside each card
     
-    /* Override ALL Streamlit primary buttons */
-    button[kind="primary"], div.stButton > button {
-        background: linear-gradient(90deg, #4ADE80, #22C55E) !important;
-        color: white !important;
-        border: none !important;
+     /* Primary Buttons - Wealthsimple Style (Clean Dark) */
+    div.stButton > button {
+        background-color: #1F1F1F !important; /* Matte Black */
+        color: #ffffff !important;
+        border: 1px solid #1F1F1F !important;
         border-radius: 8px !important;
-        padding: 0.8rem 1.4rem !important;
+        padding: 0.6rem 1.2rem !important;
         font-weight: 600 !important;
-        box-shadow: 0 2px 6px rgba(0,0,0,0.15) !important;
-        transition: 0.2s ease-in-out !important;
+        transition: all 0.2s ease-in-out !important;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.1) !important;
     }
-    
-    /* Hover */
-    button[kind="primary"]:hover, div.stButton > button:hover {
-        filter: brightness(1.12) !important;
-        cursor: pointer !important;
+    div.stButton > button:hover {
+        background-color: #333333 !important; /* Lighter Charcoal on Hover */
+        border-color: #333333 !important;
+        color: white !important;
+        transform: translateY(-1px);
+        box-shadow: 0 4px 8px rgba(0,0,0,0.15) !important;
     }
     
     # Makes buttons black with white text
