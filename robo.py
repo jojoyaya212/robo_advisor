@@ -97,9 +97,10 @@ st.markdown("""
     # Subtle shadow (card effect)
     # Padding inside each card
     
-     /* Primary Buttons - Wealthsimple Style (Clean Dark) */
-    div.stButton > button {
-        background-color: #1F1F1F !important; /* Matte Black */
+   /* Primary Buttons - Wealthsimple Style (Clean Dark) */
+    /* Target both specific Streamlit primary buttons and general buttons to override red default */
+    div.stButton > button, button[kind="primary"] {
+        background-color: #1F1F1F !important; /* Force Matte Black always */
         color: #ffffff !important;
         border: 1px solid #1F1F1F !important;
         border-radius: 8px !important;
@@ -108,7 +109,9 @@ st.markdown("""
         transition: all 0.2s ease-in-out !important;
         box-shadow: 0 2px 4px rgba(0,0,0,0.1) !important;
     }
-    div.stButton > button:hover {
+    
+    /* Hover State */
+    div.stButton > button:hover, button[kind="primary"]:hover {
         background-color: #333333 !important; /* Lighter Charcoal on Hover */
         border-color: #333333 !important;
         color: white !important;
