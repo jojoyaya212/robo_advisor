@@ -97,7 +97,7 @@ st.markdown("""
     # Subtle shadow (card effect)
     # Padding inside each card
     
-   /* Primary Buttons - Wealthsimple Style (Clean Dark) */
+  /* Primary Buttons - Wealthsimple Style (Clean Dark) */
     /* Target both specific Streamlit primary buttons and general buttons to override red default */
     div.stButton > button, button[kind="primary"] {
         background-color: #1F1F1F !important; /* Force Matte Black always */
