@@ -677,7 +677,7 @@ with tab_tool:
                 options=["Conservative", "Moderate", "Aggressive"],
                 value="Moderate"
             )
-            lambdas = {"Conservative": 5.0, "Moderate": 2.5, "Aggressive": 1.0}
+            lambdas = {"Conservative": 2.0, "Moderate": 1.0, "Aggressive": 0.3}
             
             st.info(f"**Strategy:** {risk_level} optimization focuses on {'capital preservation' if risk_level=='Conservative' else 'growth' if risk_level=='Aggressive' else 'balanced returns'}.")
         # Investor views (BL)    
