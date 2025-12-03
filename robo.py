@@ -41,13 +41,11 @@ st.set_page_config(
 # Set font; headings; sidebar; make metrics cars look like "cards" with subtle shadows
 # style buttons, tables and expanders 
 # injecting custom CSS styling into a Streamlit to override Streamlit’s default design.
-"""
-CSS = Cascading Style Sheets
-It is the language used to control how things look on a webpage or app.
-HTML = the content
-CSS = the appearance
-JavaScript = the behavior
-"""
+# CSS = Cascading Style Sheets
+# It is the language used to control how things look on a webpage or app.
+# HTML = the content
+# CSS = the appearance
+# JavaScript = the behavior
 st.markdown("""
     <style>
     /* Main Font */
