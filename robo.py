@@ -432,7 +432,7 @@ def black_litterman_adjustment(mu_prior, cov, views, ticker_info, view_confidenc
 # ============================================================
 # Notes: Define a mean–variance optimizer.
 # Logic: given mu and cov (after BL adjustment) and a lambda_risk from the user, compute a diversified, implementable portfolio that sums to 100% and respects no-short and maximum weight rules.
-
+# portfolio will always have between 5 and 15 ETFs, but mathematically it is biased to stay close to 5 or 6 due to the 20% cap and correlations.
 def optimize_portfolio(mu, cov, lambda_risk):
     n = len(mu)
     w0 = np.ones(n) / n #equal-weight starting guess
