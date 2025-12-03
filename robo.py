@@ -355,49 +355,49 @@ def black_litterman_adjustment(mu_prior, cov, views, ticker_info, view_confidenc
 
 # Notes: For each pre-coded view label, call get_indices to find which ETFs in the current candidate universe match.
 # -------- Correct BL view magnitudes matching UI labels --------
-if "Tech" in views:               # Tech Boom (+5%)
-    idx = get_indices('Sector_Focus', 'Technology')
-    if idx:
-        row = np.zeros(n_assets)
-        row[idx] = 1 / len(idx)
-        active_views.append((row, 0.05))
-
-if "Energy" in views:             # Energy Slump (-3%)
-    idx = get_indices('Sector_Focus', 'Energy')
-    if idx:
-        row = np.zeros(n_assets)
-        row[idx] = 1 / len(idx)
-        active_views.append((row, -0.03))
-
-if "NorthAmerica" in views:       # North America Strength (+15%)
-    idx = get_indices('Geographic_Focus', 'North America')
-    if idx:
-        row = np.zeros(n_assets)
-        row[idx] = 1 / len(idx)
-        active_views.append((row, 0.15))
-
-if "EmergingMarkets" in views:    # EM Rally (+6%)
-    idx = get_indices('Geographic_Focus', 'Emerging Markets')
-    if idx:
-        row = np.zeros(n_assets)
-        row[idx] = 1 / len(idx)
-        active_views.append((row, 0.06))
-
-if "Stability" in views:          # Stability (+2%)
-    idx_u = get_indices('Sector_Focus', 'Utilities')
-    idx_c = get_indices('Sector_Focus', 'Consumer Staples')
-    idx = idx_u + idx_c
-    if idx:
-        row = np.zeros(n_assets)
-        row[idx] = 1 / len(idx)
-        active_views.append((row, 0.02))
-
-if "High Yield" in views:         # High Yield (+3%)
-    idx = get_indices('ETF_General_Type', 'Bond')
-    if idx:
-        row = np.zeros(n_assets)
-        row[idx] = 1 / len(idx)
-        active_views.append((row, 0.03))
+    if "Tech" in views:               # Tech Boom (+5%)
+        idx = get_indices('Sector_Focus', 'Technology')
+        if idx:
+            row = np.zeros(n_assets)
+            row[idx] = 1 / len(idx)
+            active_views.append((row, 0.05))
+    
+    if "Energy" in views:             # Energy Slump (-3%)
+        idx = get_indices('Sector_Focus', 'Energy')
+        if idx:
+            row = np.zeros(n_assets)
+            row[idx] = 1 / len(idx)
+            active_views.append((row, -0.03))
+    
+    if "NorthAmerica" in views:       # North America Strength (+15%)
+        idx = get_indices('Geographic_Focus', 'North America')
+        if idx:
+            row = np.zeros(n_assets)
+            row[idx] = 1 / len(idx)
+            active_views.append((row, 0.15))
+    
+    if "EmergingMarkets" in views:    # EM Rally (+6%)
+        idx = get_indices('Geographic_Focus', 'Emerging Markets')
+        if idx:
+            row = np.zeros(n_assets)
+            row[idx] = 1 / len(idx)
+            active_views.append((row, 0.06))
+    
+    if "Stability" in views:          # Stability (+2%)
+        idx_u = get_indices('Sector_Focus', 'Utilities')
+        idx_c = get_indices('Sector_Focus', 'Consumer Staples')
+        idx = idx_u + idx_c
+        if idx:
+            row = np.zeros(n_assets)
+            row[idx] = 1 / len(idx)
+            active_views.append((row, 0.02))
+    
+    if "High Yield" in views:         # High Yield (+3%)
+        idx = get_indices('ETF_General_Type', 'Bond')
+        if idx:
+            row = np.zeros(n_assets)
+            row[idx] = 1 / len(idx)
+            active_views.append((row, 0.03))
 
 
     if not active_views:
